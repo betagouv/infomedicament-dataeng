@@ -1,6 +1,6 @@
 # infomedicament-dataeng
 
-Parser for ANSM medication HTML documents (Notices and RCPs).
+Data engineering tools for ANSM's [infomedicament](https://infomedicament.beta.gouv.fr) website.
 
 ## Installation
 
