@@ -8,6 +8,7 @@ Data engineering tools for ANSM's [infomedicament](https://infomedicament.beta.g
 - [DB Import](#db-import) — import parsed JSONL files into PostgreSQL
 - [SQL to CSV](#sql-to-csv-conversion) — convert T-SQL/MySQL dump files to CSV
 - [Pediatric Classification](#pediatric-classification) — classify RCPs for pediatric use
+- [Import from data.gouv.fr](#import-from-datagouvfr) — fetch open datasets and load them into PostgreSQL
 
 ## Installation
 
@@ -160,6 +161,50 @@ poetry run infomedicament-dataeng classify-pediatric \
 ```
 
 The predictions CSV includes explainability columns (matched keywords, evidence text, C-reasons) for manual review.
+
+### Import from data.gouv.fr
+
+Fetch datasets from the French open-data platform and load them into PostgreSQL. Each run truncates the target table and re-inserts all rows.
+
+```bash
+poetry run infomedicament-dataeng import-datagouv --config <yaml_file> [--dataset <name>]
+```
+
+Options:
+- `--config`: Path to a YAML dataset config file (required)
+- `--dataset`: Name of a specific dataset to import (default: all datasets in the file)
+
+Example:
+```bash
+# Import all datasets defined in data_sources/has.yml (asmr and smr)
+poetry run infomedicament-dataeng import-datagouv --config data_sources/has.yml
+
+# Import only the smr table
+poetry run infomedicament-dataeng import-datagouv --config data_sources/has.yml --dataset smr
+```
+
+#### Adding a new dataset
+
+Dataset configuration lives in YAML files under `data_sources/`. Each entry maps a data.gouv.fr resource to a PostgreSQL table:
+
+```yaml
+datasets:
+  my_dataset:
+    datagouv_dataset_id: "<resource UUID from data.gouv.fr>"
+    postgresql_table: my_table
+    source:
+      type: csv
+      delimiter: ";"
+      quotechar: "$"   # optional, defaults to standard "
+      encoding: utf-8  # or cp1252 for Windows-encoded files
+    columns:
+      - name: col_one
+        type: str
+      - name: col_two
+        type: str
+```
+
+The table must be created first via a Kysely migration in the [`infomedicament`](https://github.com/betagouv/infomed) NextJS project.
 
 ## Configuration
 
