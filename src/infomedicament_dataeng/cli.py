@@ -216,9 +216,7 @@ def traiter_depuis_s3(
     # Pre-filter: only keep filenames that map to authorized CIS codes
     # This avoids downloading files we'll skip anyway
     files_to_fetch = {
-        filename: cis
-        for filename, cis in mapping.items()
-        if cis in cis_autorises and filename.startswith(pattern)
+        filename: cis for filename, cis in mapping.items() if cis in cis_autorises and filename.startswith(pattern)
     }
     logger.info(f"{len(files_to_fetch)} files match authorized CIS codes with pattern '{pattern}'")
 
@@ -380,7 +378,15 @@ def run_pediatric_classification(
         header = ["cis", "pred_A", "pred_B", "pred_C"]
         if ground_truth:
             header += ["truth_A", "truth_B", "truth_C", "match_A", "match_B", "match_C"]
-        header += ["a_reasons", "b_reasons", "c_reasons", "keywords_41_42", "keywords_43", "evidence_41_42", "evidence_43"]
+        header += [
+            "a_reasons",
+            "b_reasons",
+            "c_reasons",
+            "keywords_41_42",
+            "keywords_43",
+            "evidence_41_42",
+            "evidence_43",
+        ]
         writer.writerow(header)
 
         for cis, pred in zip(all_cis, predictions):
@@ -397,7 +403,9 @@ def run_pediatric_classification(
                         int(truth_a) if isinstance(truth_a, bool) else "",
                         int(truth_b) if isinstance(truth_b, bool) else "",
                         int(truth_c) if isinstance(truth_c, bool) else "",
-                        "", "", "",
+                        "",
+                        "",
+                        "",
                     ]
                 row += ["", "", "RCP manquant", "", "", "", ""]
                 writer.writerow(row)
@@ -493,7 +501,9 @@ def db_import(pattern: str, limite: int | None = None) -> None:
 
         imported, db_errors = import_to_postgres(
             tqdm(records, desc="records", unit="rec", leave=False),
-            main_table, content_table, config.postgres,
+            main_table,
+            content_table,
+            config.postgres,
         )
         total_imported += imported
         total_errors += parse_errors + db_errors

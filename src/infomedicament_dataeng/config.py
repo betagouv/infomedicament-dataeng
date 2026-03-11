@@ -14,7 +14,7 @@ class S3Config:
     secret_key: str
     bucket_name: str
     notice_prefix: str  # Prefix for Notices HTML files in bucket
-    rcp_prefix: str # Prefix for RCP HTML files in bucket
+    rcp_prefix: str  # Prefix for RCP HTML files in bucket
     output_prefix: str  # Prefix for output files (e.g., "exports/parsed/")
 
     @classmethod

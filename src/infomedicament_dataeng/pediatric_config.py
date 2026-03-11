@@ -13,37 +13,43 @@ POSITIVE_INDICATION_PATTERNS = [
 ]
 
 # This helps us decide how to handle cases where more than 1 conditions are met.
-TIE_BREAKER_PRIORITY = {
-    "AB": "AB",
-    "AC": "AC",
-    "BC": "B",
-    "ABC": "AB"
-}
+TIE_BREAKER_PRIORITY = {"AB": "AB", "AC": "AC", "BC": "B", "ABC": "AB"}
 
 # Keywords and matching
 
 PEDIATRIC_KEYWORDS = [
-    "pédiatrie", "pédiatrique", "enfant", "enfants",
-    "nourrisson", "nourrissons",
-    "nouveau-né", "nouveau-nés", "nouveaux-nés",
-    "prématuré", "prématurés",
+    "pédiatrie",
+    "pédiatrique",
+    "enfant",
+    "enfants",
+    "nourrisson",
+    "nourrissons",
+    "nouveau-né",
+    "nouveau-nés",
+    "nouveaux-nés",
+    "prématuré",
+    "prématurés",
     "infantile",
-    "adolescent", "adolescents", "adolescente", "adolescentes",
-    "juvénile", "juvéniles",
+    "adolescent",
+    "adolescents",
+    "adolescente",
+    "adolescentes",
+    "juvénile",
+    "juvéniles",
     "immature",
 ]
 
 # Patterns for age/weight mentions (< 18 years)
 PEDIATRIC_AGE_PATTERNS = [
     # Age in years (0-18 ans): "âgé de moins de 12 ans", "< 6 ans", ">= 6 ans", etc.
-    r'\b(?:âgée?s?|age|âge)\s*(?:de\s*)?(?:moins\s*de\s*|[<>]=?\s*|inférieure?\s*à\s*|supérieure?\s*à\s*)?(?:1[0-8]|[0-9])\s*ans?\b',
+    r"\b(?:âgée?s?|age|âge)\s*(?:de\s*)?(?:moins\s*de\s*|[<>]=?\s*|inférieure?\s*à\s*|supérieure?\s*à\s*)?(?:1[0-8]|[0-9])\s*ans?\b",
     # Age in months/days: any number is pediatric — "18 mois", "24 mois", "28 jours"
-    r'\b(?:âgée?s?|age|âge)\s*(?:de\s*)?(?:moins\s*de\s*|[<>]=?\s*|inférieure?\s*à\s*|supérieure?\s*à\s*)?(?:[0-9]+)\s*(?:mois|jours?)\b',
+    r"\b(?:âgée?s?|age|âge)\s*(?:de\s*)?(?:moins\s*de\s*|[<>]=?\s*|inférieure?\s*à\s*|supérieure?\s*à\s*)?(?:[0-9]+)\s*(?:mois|jours?)\b",
     # "plus de 15 ans", "à partir de 16 ans" (age-bounded indications)
-    r'\bplus\s*de\s*(?:1[0-7]|[0-9])\s*ans\b',
-    r'\bà\s*partir\s*de\s*(?:1[0-7]|[0-9])\s*ans\b',
+    r"\bplus\s*de\s*(?:1[0-7]|[0-9])\s*ans\b",
+    r"\bà\s*partir\s*de\s*(?:1[0-7]|[0-9])\s*ans\b",
     # "poids < 30 kg", "poids >= 40 kg", "pesant moins de 15 kg"
-    r'\b(?:poids|pesant)\s*(?:de\s*)?(?:moins\s*de\s*|[<>]=?\s*|inférieure?\s*à\s*|supérieure?\s*à\s*)?(?:[0-9]+(?:[.,][0-9]+)?)\s*kg\b',
+    r"\b(?:poids|pesant)\s*(?:de\s*)?(?:moins\s*de\s*|[<>]=?\s*|inférieure?\s*à\s*|supérieure?\s*à\s*)?(?:[0-9]+(?:[.,][0-9]+)?)\s*kg\b",
 ]
 
 # --- Negative phrase patterns (lead to C: "Sur avis") ---

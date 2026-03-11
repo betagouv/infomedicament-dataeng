@@ -18,6 +18,7 @@ from infomedicament_dataeng import pediatric_config
 
 # --- Section extraction ---
 
+
 def extract_section_texts(rcp_json: dict, section_prefix: str) -> list[str]:
     """Extract all text blocks from an RCP section.
 
@@ -70,6 +71,7 @@ def _collect_texts(node: dict, texts: list[str]) -> None:
 
 # --- Classification ---
 
+
 def find_pediatric_keywords_in_text(text: str) -> list[str]:
     """Find all pediatric keywords/patterns present in a text block."""
     if not text:
@@ -115,6 +117,7 @@ def is_adult_reserved(text: str) -> bool:
 @dataclass
 class SentenceMatch:
     """A text block that matched during classification."""
+
     text: str
     keywords: list[str]
     negative_pattern: str | None = None
@@ -124,6 +127,7 @@ class SentenceMatch:
 @dataclass
 class PediatricClassification:
     """Result of pediatric classification for a single drug."""
+
     cis: str
     condition_a: bool = False
     condition_b: bool = False
@@ -169,24 +173,18 @@ def classify(rcp_json: dict, atc_code: str = "") -> PediatricClassification:
 
         if neg:
             has_negative = True
-            result.matches_41_42.append(
-                SentenceMatch(text=text, keywords=keywords, negative_pattern=neg)
-            )
+            result.matches_41_42.append(SentenceMatch(text=text, keywords=keywords, negative_pattern=neg))
         elif pediatric_config.REQUIRE_POSITIVE_INDICATION:
             # Strict mode: need an explicit indication phrase
             if matches_positive_indication(text):
                 has_positive = True
-                result.matches_41_42.append(
-                    SentenceMatch(text=text, keywords=keywords, is_positive=True)
-                )
+                result.matches_41_42.append(SentenceMatch(text=text, keywords=keywords, is_positive=True))
             else:
                 has_keyword_no_indication = True
         else:
             # Permissive mode: keyword without negative → positive
             has_positive = True
-            result.matches_41_42.append(
-                SentenceMatch(text=text, keywords=keywords, is_positive=True)
-            )
+            result.matches_41_42.append(SentenceMatch(text=text, keywords=keywords, is_positive=True))
 
     # "réservé à l'adulte" check on full 4.1/4.2 text
     full_text_41_42 = " ".join(texts_41_42)
@@ -224,12 +222,12 @@ def classify(rcp_json: dict, atc_code: str = "") -> PediatricClassification:
         result.b_reasons.append("mention pédiatrique en 4.3")
     result.condition_b = len(result.matches_43) > 0
 
-    if tbp:=pediatric_config.TIE_BREAKER_PRIORITY:
+    if tbp := pediatric_config.TIE_BREAKER_PRIORITY:
         prediction = ""
         prediction += "A" if result.condition_a else ""
         prediction += "B" if result.condition_b else ""
         prediction += "C" if result.condition_c else ""
-        if len(prediction)>=2:
+        if len(prediction) >= 2:
             override = tbp[prediction]
             result.condition_a = "A" in override
             result.condition_b = "B" in override
@@ -239,6 +237,7 @@ def classify(rcp_json: dict, atc_code: str = "") -> PediatricClassification:
 
 
 # --- Evaluation ---
+
 
 def load_ground_truth(path: str) -> dict[str, dict]:
     """Load ground truth CSV. Returns dict keyed by CIS code.
@@ -299,8 +298,14 @@ def compute_metrics(
         accuracy = (tp + tn) / total if total > 0 else 0.0
 
         metrics[label] = {
-            "tp": tp, "fp": fp, "fn": fn, "tn": tn,
-            "precision": precision, "recall": recall, "f1": f1, "accuracy": accuracy,
+            "tp": tp,
+            "fp": fp,
+            "fn": fn,
+            "tn": tn,
+            "precision": precision,
+            "recall": recall,
+            "f1": f1,
+            "accuracy": accuracy,
         }
 
     # Overall: all 3 labels correct
@@ -309,9 +314,7 @@ def compute_metrics(
             continue
         total_evaluated += 1
         gt = ground_truth[pred.cis]
-        if (pred.condition_a == gt["A"]
-                and pred.condition_b == gt["B"]
-                and pred.condition_c == gt["C"]):
+        if pred.condition_a == gt["A"] and pred.condition_b == gt["B"] and pred.condition_c == gt["C"]:
             total_correct_all += 1
 
     metrics["overall"] = {

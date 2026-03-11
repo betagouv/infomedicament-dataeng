@@ -152,9 +152,7 @@ class TestSqlToCsv:
 
         mixed_sql = tmp_path / "mixed.sql"
         mixed_sql.write_text(
-            "SELECT 1;\n"
-            "INSERT INTO test (id, name) VALUES (1, 'foo'), (2, 'bar');\n"
-            "CREATE TABLE other (x INT);\n",
+            "SELECT 1;\nINSERT INTO test (id, name) VALUES (1, 'foo'), (2, 'bar');\nCREATE TABLE other (x INT);\n",
             encoding="utf-8",
         )
 

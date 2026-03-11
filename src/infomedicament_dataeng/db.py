@@ -89,14 +89,14 @@ def _delete_content_tree(cur, content_table: str, ids: list[int]) -> None:
     """Recursively delete a content tree bottom-up (children before parents)."""
     if not ids:
         return
-    cur.execute(f'SELECT children FROM {content_table} WHERE id = ANY(%s)', (ids,))
+    cur.execute(f"SELECT children FROM {content_table} WHERE id = ANY(%s)", (ids,))
     nested = []
     for (children,) in cur.fetchall():
         if children:
             nested.extend(children)
     if nested:
         _delete_content_tree(cur, content_table, nested)
-    cur.execute(f'DELETE FROM {content_table} WHERE id = ANY(%s)', (ids,))
+    cur.execute(f"DELETE FROM {content_table} WHERE id = ANY(%s)", (ids,))
 
 
 def _insert_content_blocks(cur, content_table: str, blocks: list) -> list[int]:

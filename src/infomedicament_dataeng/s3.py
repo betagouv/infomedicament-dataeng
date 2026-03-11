@@ -32,8 +32,8 @@ class S3Client:
                     # CleverCloud S3 implementation does not support recent data integrity features from AWS.
                     # https://github.com/boto/boto3/issues/4392
                     # https://github.com/boto/boto3/issues/4398#issuecomment-2619946229
-                request_checksum_calculation="when_required",
-                response_checksum_validation="when_required"
+                    request_checksum_calculation="when_required",
+                    response_checksum_validation="when_required",
                 ),
             )
         return self._client

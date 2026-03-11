@@ -30,8 +30,8 @@ def extract_value(val: exp.Expression) -> str | int | float | None:
 def sql_to_csv(
     sql_path: Path,
     output_path: Path | None = None,
-    encoding: str = "iso-8859-1", # This is the encoding of the CODEX extracts
-    dialect: str = "tsql", # This is the SQL format of the CODEX extracts
+    encoding: str = "iso-8859-1",  # This is the encoding of the CODEX extracts
+    dialect: str = "tsql",  # This is the SQL format of the CODEX extracts
 ) -> dict[str, int]:
     """
     Converts a SQL file to CSV
@@ -57,7 +57,10 @@ def sql_to_csv(
 
     for stmt in statements:
         if not isinstance(stmt, exp.Insert):
-            logging.warning(f"This SQL file has non-insert statements of type {type(stmt)}. Some information could be lost in the process.")
+            logging.warning(
+                f"This SQL file has non-insert statements of type {type(stmt)}."
+                " Some information could be lost in the process."
+            )
             continue
 
         # Table name (stmt.this is a Schema, the actual Table is in stmt.this.this)

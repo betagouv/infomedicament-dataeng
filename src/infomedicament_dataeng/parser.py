@@ -12,11 +12,10 @@ def normaliser_texte(texte: str) -> str:
     regex matching works consistently.
     """
     return (
-        texte
-        .replace("\u2019", "'")   # right single quotation mark
-        .replace("\u2018", "'")   # left single quotation mark
-        .replace("\u2011", "-")   # non-breaking hyphen
-        .replace("\u2013", "-")   # en dash
+        texte.replace("\u2019", "'")  # right single quotation mark
+        .replace("\u2018", "'")  # left single quotation mark
+        .replace("\u2011", "-")  # non-breaking hyphen
+        .replace("\u2013", "-")  # en dash
         .replace("\u2265", ">=")  # change ≥ to >=
         .replace("\u2264", "<=")  # change ≤ to <=
     )

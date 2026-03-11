@@ -9,8 +9,8 @@ from infomedicament_dataeng.pediatric import (
     matches_negative_pattern,
 )
 
-
 # test helper functions
+
 
 class TestFindPediatricKeywords:
     def test_finds_simple_keyword(self):
@@ -76,12 +76,15 @@ class TestIsAdultReserved:
 
 # classify tests
 
+
 class TestClassify:
     def test_positive_indication(self, make_rcp):
         """Keyword in 4.1 without negative pattern → A=True."""
-        rcp = make_rcp(sections={
-            "4.1": ["Ce médicament est indiqué chez l'enfant de plus de 6 ans"],
-        })
+        rcp = make_rcp(
+            sections={
+                "4.1": ["Ce médicament est indiqué chez l'enfant de plus de 6 ans"],
+            }
+        )
         result = classify(rcp)
         assert result.condition_a is True
         assert len(result.matches_41_42) > 0
@@ -89,9 +92,11 @@ class TestClassify:
 
     def test_negative_pattern_gives_c(self, make_rcp):
         """Keyword + negative pattern in 4.2 → C=True, A=False."""
-        rcp = make_rcp(sections={
-            "4.2": ["La sécurité et l'efficacité n'ont pas été étudiées chez les enfants"],
-        })
+        rcp = make_rcp(
+            sections={
+                "4.2": ["La sécurité et l'efficacité n'ont pas été étudiées chez les enfants"],
+            }
+        )
         result = classify(rcp)
         assert result.condition_a is False
         assert result.a_reasons == []
@@ -100,9 +105,11 @@ class TestClassify:
     def test_keyword_without_indication_gives_c(self, make_rcp, monkeypatch):
         """Keyword present but no indication phrase → C=True, A=False."""
         monkeypatch.setattr("infomedicament_dataeng.pediatric_config.REQUIRE_POSITIVE_INDICATION", True)
-        rcp = make_rcp(sections={
-            "4.1": ["Posologie chez l'enfant de plus de 6 ans : 10 mg/jour"],
-        })
+        rcp = make_rcp(
+            sections={
+                "4.1": ["Posologie chez l'enfant de plus de 6 ans : 10 mg/jour"],
+            }
+        )
         result = classify(rcp)
         assert result.condition_a is False
         assert result.condition_c is True
@@ -110,9 +117,11 @@ class TestClassify:
 
     def test_no_keyword_gives_c(self, make_rcp):
         """No pediatric keyword at all → C=True."""
-        rcp = make_rcp(sections={
-            "4.1": ["Traitement de l'hypertension artérielle"],
-        })
+        rcp = make_rcp(
+            sections={
+                "4.1": ["Traitement de l'hypertension artérielle"],
+            }
+        )
         result = classify(rcp)
         assert result.condition_a is False
         assert result.condition_c is True
@@ -120,10 +129,12 @@ class TestClassify:
 
     def test_contraindication_in_43(self, make_rcp):
         """Keyword in 4.3 → B=True."""
-        rcp = make_rcp(sections={
-            "4.1": ["Ce médicament est indiqué chez l'enfant"],
-            "4.3": ["Contre-indiqué chez le nourrisson de moins de 3 mois"],
-        })
+        rcp = make_rcp(
+            sections={
+                "4.1": ["Ce médicament est indiqué chez l'enfant"],
+                "4.3": ["Contre-indiqué chez le nourrisson de moins de 3 mois"],
+            }
+        )
         result = classify(rcp)
         assert result.condition_b is True
         assert len(result.matches_43) > 0
@@ -131,28 +142,34 @@ class TestClassify:
 
     def test_adult_reserved(self, make_rcp):
         """'réservé à l'adulte' in 4.1 → C=True."""
-        rcp = make_rcp(sections={
-            "4.1": ["Ce médicament est réservé à l'adulte"],
-        })
+        rcp = make_rcp(
+            sections={
+                "4.1": ["Ce médicament est réservé à l'adulte"],
+            }
+        )
         result = classify(rcp)
         assert result.condition_c is True
         assert "réservé à l'adulte" in result.c_reasons
 
     def test_contraceptive_atc(self, make_rcp):
         """ATC G03A → C=True."""
-        rcp = make_rcp(sections={
-            "4.1": ["Contraception orale"],
-        })
+        rcp = make_rcp(
+            sections={
+                "4.1": ["Contraception orale"],
+            }
+        )
         result = classify(rcp, atc_code="G03AA07")
         assert result.condition_c is True
         assert "contraceptif (ATC G03)" in result.c_reasons
 
     def test_a_and_b_together(self, make_rcp):
         """Indication in 4.1 + contraindication in 4.3 → A=True and B=True."""
-        rcp = make_rcp(sections={
-            "4.1": ["Ce médicament est indiqué chez l'enfant de plus de 6 ans"],
-            "4.3": ["Contre-indiqué chez l'enfant de moins de 6 ans"],
-        })
+        rcp = make_rcp(
+            sections={
+                "4.1": ["Ce médicament est indiqué chez l'enfant de plus de 6 ans"],
+                "4.3": ["Contre-indiqué chez l'enfant de moins de 6 ans"],
+            }
+        )
         result = classify(rcp)
         assert result.condition_a is True
         assert result.condition_b is True
@@ -161,17 +178,21 @@ class TestClassify:
 
     def test_c_overrides_a(self, make_rcp, monkeypatch):
         """C overrides A, but B overrides C."""
-        monkeypatch.setattr("infomedicament_dataeng.pediatric_config.TIE_BREAKER_PRIORITY", {"AC": "C", "BC": "B", "ABC": "B"})
-        rcp = make_rcp(sections={
-            "4.1": [
-                "Ce médicament est indiqué chez l'enfant de plus de 6 ans",
-                "La sécurité et l'efficacité n'ont pas été étudiées chez les enfants",
-            ],
-            "4.3": ["Contre-indiqué chez le nourrisson"],
-        })
+        monkeypatch.setattr(
+            "infomedicament_dataeng.pediatric_config.TIE_BREAKER_PRIORITY", {"AC": "C", "BC": "B", "ABC": "B"}
+        )
+        rcp = make_rcp(
+            sections={
+                "4.1": [
+                    "Ce médicament est indiqué chez l'enfant de plus de 6 ans",
+                    "La sécurité et l'efficacité n'ont pas été étudiées chez les enfants",
+                ],
+                "4.3": ["Contre-indiqué chez le nourrisson"],
+            }
+        )
         result = classify(rcp)
         assert result.condition_a is False  # C overrode A
-        assert result.condition_b is True   # B overrides C
+        assert result.condition_b is True  # B overrides C
         assert result.condition_c is False  # B overrode C
         # Reasons/matches are still populated for traceability
         assert "keyword positif en 4.1/4.2" in result.a_reasons
@@ -191,6 +212,7 @@ class TestClassify:
 
 # extract_section_texts tests
 
+
 class TestExtractSectionTexts:
     def test_extracts_section(self, make_rcp):
         rcp = make_rcp(sections={"4.1": ["Indiqué chez l'adulte"]})
@@ -198,9 +220,11 @@ class TestExtractSectionTexts:
         assert texts == ["Indiqué chez l'adulte"]
 
     def test_extracts_multiple_texts(self, make_rcp):
-        rcp = make_rcp(sections={
-            "4.2": ["Posologie chez l'adulte", "Posologie chez l'enfant"],
-        })
+        rcp = make_rcp(
+            sections={
+                "4.2": ["Posologie chez l'adulte", "Posologie chez l'enfant"],
+            }
+        )
         texts = extract_section_texts(rcp, "4.2")
         assert len(texts) == 2
 
@@ -212,17 +236,21 @@ class TestExtractSectionTexts:
         """Generic subsection headings like 'Population pédiatrique' are skipped."""
         rcp = {
             "source": {"cis": "12345"},
-            "content": [{
-                "type": "AmmAnnexeTitre1",
-                "children": [{
-                    "type": "AmmAnnexeTitre2",
-                    "content": "4.2 Posologie",
+            "content": [
+                {
+                    "type": "AmmAnnexeTitre1",
                     "children": [
-                        {"type": "AmmAnnexeTitre3", "content": "Population pédiatrique"},
-                        {"type": "AmmCorpsTexte", "content": "Sans objet"},
+                        {
+                            "type": "AmmAnnexeTitre2",
+                            "content": "4.2 Posologie",
+                            "children": [
+                                {"type": "AmmAnnexeTitre3", "content": "Population pédiatrique"},
+                                {"type": "AmmCorpsTexte", "content": "Sans objet"},
+                            ],
+                        }
                     ],
-                }],
-            }],
+                }
+            ],
         }
         texts = extract_section_texts(rcp, "4.2")
         assert "Population pédiatrique" not in texts
@@ -230,6 +258,7 @@ class TestExtractSectionTexts:
 
 
 # ground truth loading
+
 
 class TestLoadGroundTruth:
     def test_loads_correctly(self, ground_truth_csv):

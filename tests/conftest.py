@@ -55,14 +55,14 @@ def _make_rcp(cis="12345", sections=None):
     sections = sections or {}
     titre2_nodes = []
     for prefix, texts in sections.items():
-        children = [
-            {"type": "AmmCorpsTexte", "content": t} for t in texts
-        ]
-        titre2_nodes.append({
-            "type": "AmmAnnexeTitre2",
-            "content": f"{prefix} Section heading",
-            "children": children,
-        })
+        children = [{"type": "AmmCorpsTexte", "content": t} for t in texts]
+        titre2_nodes.append(
+            {
+                "type": "AmmAnnexeTitre2",
+                "content": f"{prefix} Section heading",
+                "children": children,
+            }
+        )
     return {
         "source": {"cis": cis},
         "content": [
@@ -82,9 +82,7 @@ def ground_truth_csv(tmp_path: Path) -> Path:
     """Write a small ground truth CSV and return its path."""
     gt_file = tmp_path / "gt.csv"
     gt_file.write_text(
-        "CIS,A:Indication,B:Contre-indication,C:Sur avis\n"
-        "12345,oui,non,non\n"
-        "67890,non,non,oui\n",
+        "CIS,A:Indication,B:Contre-indication,C:Sur avis\n12345,oui,non,non\n67890,non,non,oui\n",
         encoding="utf-8",
     )
     return gt_file
