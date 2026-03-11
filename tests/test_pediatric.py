@@ -1,6 +1,6 @@
 """Tests for pediatric classification module."""
 
-from infomed_html_parser.pediatric import (
+from infomedicament_dataeng.pediatric import (
     classify,
     extract_section_texts,
     find_pediatric_keywords_in_text,
@@ -99,7 +99,7 @@ class TestClassify:
 
     def test_keyword_without_indication_gives_c(self, make_rcp, monkeypatch):
         """Keyword present but no indication phrase → C=True, A=False."""
-        monkeypatch.setattr("infomed_html_parser.pediatric_config.REQUIRE_POSITIVE_INDICATION", True)
+        monkeypatch.setattr("infomedicament_dataeng.pediatric_config.REQUIRE_POSITIVE_INDICATION", True)
         rcp = make_rcp(sections={
             "4.1": ["Posologie chez l'enfant de plus de 6 ans : 10 mg/jour"],
         })
@@ -161,7 +161,7 @@ class TestClassify:
 
     def test_c_overrides_a(self, make_rcp, monkeypatch):
         """C overrides A, but B overrides C."""
-        monkeypatch.setattr("infomed_html_parser.pediatric_config.TIE_BREAKER_PRIORITY", {"AC": "C", "BC": "B", "ABC": "B"})
+        monkeypatch.setattr("infomedicament_dataeng.pediatric_config.TIE_BREAKER_PRIORITY", {"AC": "C", "BC": "B", "ABC": "B"})
         rcp = make_rcp(sections={
             "4.1": [
                 "Ce médicament est indiqué chez l'enfant de plus de 6 ans",

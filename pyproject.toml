@@ -1,9 +1,9 @@
 [tool.poetry]
-name = "infomed-html-parser"
+name = "infomedicament-dataeng"
 version = "0.1.0"
-description = "Parser for ANSM medication HTML documents (Notices and RCPs)"
+description = "Data engineering tools for ANSM's infomedicament website"
 readme = "README.md"
-packages = [{include = "infomed_html_parser", from = "src"}]
+packages = [{include = "infomedicament_dataeng", from = "src"}]
 
 [tool.poetry.dependencies]
 python = ">=3.13"
@@ -23,7 +23,7 @@ pytest-cov = ">=4.0"
 ruff = ">=0.8"
 
 [tool.poetry.scripts]
-infomed-html-parser = "infomed_html_parser.cli:main"
+infomedicament-dataeng = "infomedicament_dataeng.cli:main"
 
 [build-system]
 requires = ["poetry-core>=2.0"]

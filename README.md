@@ -1,4 +1,4 @@
-# infomed-html-parser
+# infomedicament-dataeng
 
 Parser for ANSM medication HTML documents (Notices and RCPs).
 
@@ -17,7 +17,7 @@ The CLI supports two modes: **local** (for development) and **s3** (for producti
 Process HTML files from a local directory:
 
 ```bash
-poetry run infomed-html-parser local <html_folder> [options]
+poetry run infomedicament-dataeng local <html_folder> [options]
 ```
 
 Arguments:
@@ -33,10 +33,10 @@ Options:
 Example:
 ```bash
 # Uses database for CIS list (Specialite.isBdm)
-poetry run infomed-html-parser local ./html_files -o output.jsonl --pattern N
+poetry run infomedicament-dataeng local ./html_files -o output.jsonl --pattern N
 
 # With CIS file override
-poetry run infomed-html-parser local ./html_files --cis-file cis_list.txt -o output.jsonl
+poetry run infomedicament-dataeng local ./html_files --cis-file cis_list.txt -o output.jsonl
 ```
 
 ### S3 Mode
@@ -44,7 +44,7 @@ poetry run infomed-html-parser local ./html_files --cis-file cis_list.txt -o out
 Process HTML files from S3 (Clever Cloud Cellar) and write results back to S3:
 
 ```bash
-poetry run infomed-html-parser s3 [options]
+poetry run infomedicament-dataeng s3 [options]
 ```
 
 Options:
@@ -55,7 +55,7 @@ Options:
 
 Example:
 ```bash
-poetry run infomed-html-parser s3 --pattern R --limite 100
+poetry run infomedicament-dataeng s3 --pattern R --limite 100
 ```
 
 ### Global Options
@@ -121,13 +121,13 @@ Run parsing tasks as one-off containers (pass the full command):
 
 ```bash
 # Parse Notice files (N*.htm)
-scalingo --app your-app run --size 2XL "python -m infomed_html_parser.cli s3 --pattern N --batch-size 1000"
+scalingo --app your-app run --size 2XL "python -m infomedicament_dataeng.cli s3 --pattern N --batch-size 1000"
 
 # Parse RCP files (R*.htm)
-scalingo --app your-app run --size 2XL "python -m infomed_html_parser.cli s3 --pattern R --batch-size 1000"
+scalingo --app your-app run --size 2XL "python -m infomedicament_dataeng.cli s3 --pattern R --batch-size 1000"
 
 # Test with a limit
-scalingo --app your-app run "python -m infomed_html_parser.cli s3 --pattern N --limite 10"
+scalingo --app your-app run "python -m infomedicament_dataeng.cli s3 --pattern N --limite 10"
 ```
 
 
@@ -145,7 +145,7 @@ Set these in your Scalingo app settings:
 Import parsed JSONL files from S3 into PostgreSQL. This replaces the legacy TypeScript `importNoticeRCP.ts` script.
 
 ```bash
-poetry run infomed-html-parser db-import --pattern <N|R> [options]
+poetry run infomedicament-dataeng db-import --pattern <N|R> [options]
 ```
 
 Options:
@@ -155,10 +155,10 @@ Options:
 Example:
 ```bash
 # Import all RCP records
-poetry run infomed-html-parser db-import --pattern R
+poetry run infomedicament-dataeng db-import --pattern R
 
 # Test with 10 records
-poetry run infomed-html-parser db-import --pattern N --limite 10
+poetry run infomedicament-dataeng db-import --pattern N --limite 10
 ```
 
 The command lists all `parsed_<pattern>_*.jsonl` files under `S3_OUTPUT_PREFIX`, downloads each one, and upserts the records into PostgreSQL (by `codeCIS`). Existing content trees are deleted before re-inserting.
@@ -166,8 +166,8 @@ The command lists all `parsed_<pattern>_*.jsonl` files under `S3_OUTPUT_PREFIX`,
 ### Scalingo
 
 ```bash
-scalingo --app your-app run "python -m infomed_html_parser.cli db-import --pattern N"
-scalingo --app your-app run "python -m infomed_html_parser.cli db-import --pattern R"
+scalingo --app your-app run "python -m infomedicament_dataeng.cli db-import --pattern N"
+scalingo --app your-app run "python -m infomedicament_dataeng.cli db-import --pattern R"
 ```
 
 ## SQL to CSV Conversion
@@ -175,7 +175,7 @@ scalingo --app your-app run "python -m infomed_html_parser.cli db-import --patte
 Convert SQL INSERT statements (T-SQL, MySQL, PostgreSQL) to CSV files.
 
 ```bash
-poetry run infomed-html-parser sql-to-csv <sql_file> [options]
+poetry run infomedicament-dataeng sql-to-csv <sql_file> [options]
 ```
 
 Options:
@@ -186,10 +186,10 @@ Options:
 Example with Codex Triam ATC files:
 ```bash
 # Convert ClasseATC
-poetry run infomed-html-parser sql-to-csv ClasseATC_data.sql -o classe_atc.csv
+poetry run infomedicament-dataeng sql-to-csv ClasseATC_data.sql -o classe_atc.csv
 
 # Convert VUClassesATC (CIS <-> ATC links)
-poetry run infomed-html-parser sql-to-csv VUClassesATC_data.sql -o cis_atc.csv
+poetry run infomedicament-dataeng sql-to-csv VUClassesATC_data.sql -o cis_atc.csv
 ```
 
 ### Importing ATC data into PostgreSQL
@@ -215,7 +215,7 @@ Classify medications for pediatric use based on their parsed RCP content (sectio
 - **C**: Sur avis d'un professionnel de santé (requires professional advice)
 
 ```bash
-poetry run infomed-html-parser classify-pediatric --rcp <jsonl_file> [options]
+poetry run infomedicament-dataeng classify-pediatric --rcp <jsonl_file> [options]
 ```
 
 Options:
@@ -226,10 +226,10 @@ Options:
 Example:
 ```bash
 # Produce parsed RCPs first
-poetry run infomed-html-parser s3 --cis-file data/test_set_cis.csv --pattern R -o data/rcp_pediatrie.jsonl
+poetry run infomedicament-dataeng s3 --cis-file data/test_set_cis.csv --pattern R -o data/rcp_pediatrie.jsonl
 
 # Classify and evaluate against ground truth
-poetry run infomed-html-parser classify-pediatric \
+poetry run infomedicament-dataeng classify-pediatric \
   --rcp data/rcp_pediatrie.jsonl \
   --truth data/ground_truth.csv \
   -o data/predictions.csv
@@ -247,7 +247,7 @@ poetry install --with dev
 poetry run pytest
 
 # Run tests with coverage
-poetry run pytest --cov=infomed_html_parser
+poetry run pytest --cov=infomedicament_dataeng
 
 # Lint and format
 poetry run ruff check .

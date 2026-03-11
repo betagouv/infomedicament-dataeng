@@ -14,7 +14,7 @@ import csv
 import re
 from dataclasses import dataclass, field
 
-from infomed_html_parser import pediatric_config
+from infomedicament_dataeng import pediatric_config
 
 # --- Section extraction ---
 

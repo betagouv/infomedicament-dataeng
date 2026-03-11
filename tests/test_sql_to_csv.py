@@ -3,7 +3,7 @@
 import csv
 from pathlib import Path
 
-from infomed_html_parser.sql_to_csv import extract_value, sql_to_csv
+from infomedicament_dataeng.sql_to_csv import extract_value, sql_to_csv
 
 
 class TestExtractValue:

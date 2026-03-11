@@ -1,6 +1,6 @@
 """Tests for DB import utilities, converted from infomedicament JS tests."""
 
-from infomed_html_parser.db import _insert_content_blocks, get_clean_html
+from infomedicament_dataeng.db import _insert_content_blocks, get_clean_html
 
 
 class TestGetCleanHTML:

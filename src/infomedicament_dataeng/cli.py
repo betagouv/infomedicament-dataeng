@@ -509,13 +509,13 @@ def main():
         epilog="""
 Examples:
   # Local mode (uses database for CIS list by default)
-  infomed-html-parser local ./html_files -o output.jsonl
+  infomedicament-dataeng local ./html_files -o output.jsonl
 
   # Local mode with CIS file override
-  infomed-html-parser local ./html_files --cis-file cis_list.txt -o output.jsonl
+  infomedicament-dataeng local ./html_files --cis-file cis_list.txt -o output.jsonl
 
   # S3 mode (production on Scalingo)
-  infomed-html-parser s3 --pattern N
+  infomedicament-dataeng s3 --pattern N
 
 Environment variables for S3 mode:
   S3_HOST       S3 endpoint URL

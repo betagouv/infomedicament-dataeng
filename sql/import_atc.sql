@@ -2,8 +2,8 @@
 --
 -- Before running this, you should :
 --   1. Generate CSV files using the cli:
---      infomed-html-parser sql-to-csv ClasseATC_data.sql -o classe_atc.csv
---      infomed-html-parser sql-to-csv VUClassesATC_data.sql -o cis_atc.csv
+--      infomedicament-dataeng sql-to-csv ClasseATC_data.sql -o classe_atc.csv
+--      infomedicament-dataeng sql-to-csv VUClassesATC_data.sql -o cis_atc.csv
 --
 --   2. Run the Kysely migration in infomedicament:
 --      npm run db:migrate:latest
