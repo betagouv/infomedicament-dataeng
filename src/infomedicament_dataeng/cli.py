@@ -14,6 +14,7 @@ import chardet
 from tqdm import tqdm
 
 from .config import get_config
+from .datagouv import import_dataset, load_datasets
 from .db import get_authorized_cis, get_filename_to_cis_mapping, import_to_postgres
 from .io import charger_liste_cis
 from .parser import html_vers_json
@@ -512,6 +513,18 @@ def db_import(pattern: str, limite: int | None = None) -> None:
     logger.info(f"Import complete: {total_imported} records imported, {total_errors} errors")
 
 
+def run_import_datagouv(config_path: Path, dataset_name: str | None = None) -> None:
+    """Import one or all datasets defined in a data.gouv.fr YAML config file."""
+    datasets = load_datasets(config_path)
+
+    to_import = {dataset_name: datasets[dataset_name]} if dataset_name else datasets
+
+    for name, dataset in to_import.items():
+        logger.info(f"Importing dataset '{name}' into '{dataset.postgresql_table}'...")
+        count = import_dataset(dataset)
+        logger.info(f"Done: {count} rows imported into '{dataset.postgresql_table}'")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Parse ANSM medication HTML documents (Notices and RCPs)",
@@ -571,6 +584,13 @@ Environment variables for database:
     db_import_parser.add_argument("--pattern", required=True, choices=["N", "R"], help="N=Notice, R=RCP")
     db_import_parser.add_argument("--limite", type=int, help="Limit number of records to import (for testing)")
 
+    # Import from data.gouv.fr mode
+    datagouv_parser = subparsers.add_parser("import-datagouv", help="Import datasets from data.gouv.fr into PostgreSQL")
+    datagouv_parser.add_argument(
+        "--config", required=True, type=Path, help="Path to YAML config file (e.g. data_sources/has.yml)"
+    )
+    datagouv_parser.add_argument("--dataset", help="Name of a specific dataset to import (default: all)")
+
     # Pediatric classification mode
     ped_parser = subparsers.add_parser("classify-pediatric", help="Classify drugs for pediatric use")
     ped_parser.add_argument("--rcp", required=True, help="Parsed RCP JSONL file")
@@ -629,6 +649,13 @@ Environment variables for database:
     elif args.command == "db-import":
         try:
             db_import(args.pattern, limite=args.limite)
+        except Exception as e:
+            logger.exception(f"Error: {e}")
+            raise SystemExit(1)
+
+    elif args.command == "import-datagouv":
+        try:
+            run_import_datagouv(args.config, dataset_name=args.dataset)
         except Exception as e:
             logger.exception(f"Error: {e}")
             raise SystemExit(1)

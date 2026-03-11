@@ -1,0 +1,15 @@
+datasets:
+  test_dataset:
+    datagouv_dataset_id: "abc-123"
+    postgresql_table: test_table
+    source:
+      type: csv
+      delimiter: "|"
+      encoding: utf-8
+    columns:
+      - name: col_a
+        type: str
+      - name: col_b
+        type: str
+      - name: col_c
+        type: str

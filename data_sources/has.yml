@@ -1,0 +1,56 @@
+datasets:
+  asmr:
+    datagouv_dataset_id: "f6122601-81bc-4b31-a6f9-df72b7a04119"
+    postgresql_table: asmr
+    source:
+      type: csv
+      delimiter: ";"
+      quotechar: "$"
+      encoding: cp1252
+    columns:
+      - name: code_evamed
+        type: str
+      - name: motif_demande
+        type: str
+      - name: code_cis
+        type: str
+      - name: code_cip
+        type: str
+      - name: denomination_specialite
+        type: str
+      - name: date_avis_definitif
+        type: str
+      - name: asmr
+        type: str
+      - name: valeur_asmr
+        type: str
+      - name: libelle_asmr
+        type: str
+
+  smr:
+    datagouv_dataset_id: "4da2d811-1c29-4f73-9805-83ae710be6d7"
+    postgresql_table: smr
+    source:
+      type: csv
+      delimiter: ";"
+      quotechar: "$"
+      encoding: cp1252
+    columns:
+      - name: code_evamed
+        type: str
+      - name: motif_demande
+        type: str
+      - name: code_cis
+        type: str
+      - name: code_cip
+        type: str
+      - name: denomination
+        type: str
+      - name: date_avis_definitif
+        type: str
+      - name: smr
+        type: str
+      - name: valeur_smr
+        type: str
+      - name: libelle_smr
+        type: str
