@@ -263,3 +263,16 @@ poetry run ruff format .
 # Auto-fix linting issues
 poetry run ruff check . --fix
 ```
+
+### Pre-commit hooks
+
+This repo uses [pre-commit](https://pre-commit.com/) to enforce code quality:
+
+- **pre-commit**: ruff linting (with auto-fix) and formatting
+- **pre-push**: full test suite via pytest
+
+After installing dependencies, register the hooks once:
+
+```bash
+poetry run pre-commit install --hook-type pre-commit --hook-type pre-push
+```
