@@ -8,6 +8,8 @@ from infomedicament_dataeng.pediatric import (
     is_adult_reserved,
     load_ground_truth,
     matches_negative_pattern,
+    parse_explicit_age_range,
+    text_block_covers_age,
 )
 
 # test helper functions
@@ -337,9 +339,135 @@ class TestExtractSectionTexts:
         assert "Aucune donnée n'étant disponible, l'utilisation n'est pas recommandée." in texts
 
 
+class TestParseExplicitAgeRange:
+    def test_moins_de_N_ans(self):
+        assert parse_explicit_age_range("moins de 6 ans") == (0, 5)
+
+    def test_moins_de_N_ans_in_sentence(self):
+        assert parse_explicit_age_range("patients âgés de moins de 12 ans") == (0, 11)
+
+    def test_a_partir_de_N_ans(self):
+        assert parse_explicit_age_range("à partir de 12 ans") == (12, 17)
+
+    def test_plus_de_N_ans(self):
+        assert parse_explicit_age_range("plus de 15 ans") == (15, 17)
+
+    def test_N_ans_et_plus(self):
+        assert parse_explicit_age_range("12 ans et plus") == (12, 17)
+
+    def test_de_N_a_M_ans(self):
+        assert parse_explicit_age_range("de 6 à 11 ans") == (6, 11)
+
+    def test_N_a_M_ans(self):
+        assert parse_explicit_age_range("6 à 11 ans") == (6, 11)
+
+    def test_N_tiret_M_ans(self):
+        assert parse_explicit_age_range("7-17 ans") == (7, 17)
+
+    def test_lt_N_ans(self):
+        assert parse_explicit_age_range("< 6 ans") == (0, 5)
+
+    def test_lte_N_ans(self):
+        assert parse_explicit_age_range("<= 6 ans") == (0, 6)
+
+    def test_gte_N_ans(self):
+        assert parse_explicit_age_range(">= 12 ans") == (12, 17)
+
+    def test_moins_de_N_mois(self):
+        assert parse_explicit_age_range("moins de 6 mois") == (0, 0)
+
+    def test_moins_de_24_mois(self):
+        assert parse_explicit_age_range("moins de 24 mois") == (0, 0)
+
+    def test_no_match_keyword_only(self):
+        assert parse_explicit_age_range("indiqué chez l'enfant") is None
+
+    def test_no_match_empty(self):
+        assert parse_explicit_age_range("") is None
+
+
+class TestTextBlockCoversAge:
+    def test_explicit_range_covers(self):
+        assert text_block_covers_age("indiqué de 6 à 11 ans", 8)
+
+    def test_explicit_range_excludes(self):
+        assert not text_block_covers_age("indiqué de 6 à 11 ans", 12)
+
+    def test_explicit_range_overrides_broad_keyword(self):
+        # "enfant" alone would cover 0-17, but explicit range narrows it
+        assert not text_block_covers_age("enfants de 6 à 11 ans : 10 mg/jour", 4)
+
+    def test_keyword_nourrisson_covers(self):
+        assert text_block_covers_age("chez le nourrisson", 1)
+
+    def test_keyword_nourrisson_excludes(self):
+        assert not text_block_covers_age("chez le nourrisson", 5)
+
+    def test_keyword_adolescent_covers(self):
+        assert text_block_covers_age("chez l'adolescent", 14)
+
+    def test_keyword_adolescent_excludes(self):
+        assert not text_block_covers_age("chez l'adolescent", 10)
+
+    def test_keyword_enfant_covers_all_pediatric(self):
+        assert text_block_covers_age("chez l'enfant", 5)
+
+    def test_keyword_nouveau_ne_covers_neonate(self):
+        assert text_block_covers_age("chez le nouveau-né", 0)
+
+    def test_keyword_nouveau_ne_excludes_older(self):
+        assert not text_block_covers_age("chez le nouveau-né", 1)
+
+    def test_no_pediatric_signal(self):
+        assert not text_block_covers_age("traitement de l'hypertension artérielle", 5)
+
+
+class TestClassifyWithAge:
+    def test_age_filters_in_matching_block(self, make_rcp):
+        rcp = make_rcp(sections={"4.1": ["enfants de 6 à 11 ans : 10 mg/jour"]})
+        assert classify(rcp, age=8).condition_a is True
+
+    def test_age_filters_out_non_matching_block(self, make_rcp):
+        rcp = make_rcp(sections={"4.1": ["enfants de 6 à 11 ans : 10 mg/jour"]})
+        result = classify(rcp, age=12)
+        assert result.condition_a is False
+        assert result.condition_c is True
+
+    def test_age_none_keeps_existing_behavior(self, make_rcp):
+        rcp = make_rcp(sections={"4.1": ["Ce médicament est indiqué chez l'enfant de plus de 6 ans"]})
+        assert classify(rcp, age=None).condition_a is True
+
+    def test_age_filters_43_in_range(self, make_rcp):
+        rcp = make_rcp(sections={"4.3": ["Contre-indiqué chez le nourrisson"]})
+        assert classify(rcp, age=0).condition_b is True
+
+    def test_age_filters_43_out_of_range(self, make_rcp):
+        rcp = make_rcp(sections={"4.3": ["Contre-indiqué chez le nourrisson"]})
+        result = classify(rcp, age=5)
+        assert result.condition_b is False
+
+    def test_adolescent_keyword_covers_matching_age(self, make_rcp):
+        rcp = make_rcp(sections={"4.1": ["Ce médicament est indiqué chez l'adolescent"]})
+        assert classify(rcp, age=14).condition_a is True
+
+    def test_adolescent_keyword_excludes_young_child(self, make_rcp):
+        rcp = make_rcp(sections={"4.1": ["Ce médicament est indiqué chez l'adolescent"]})
+        result = classify(rcp, age=8)
+        assert result.condition_a is False
+        assert result.condition_c is True
+
+    def test_neonate_age_0(self, make_rcp):
+        rcp = make_rcp(sections={"4.1": ["indiqué chez le nouveau-né"]})
+        assert classify(rcp, age=0).condition_a is True
+
+    def test_neonate_keyword_excludes_age_2(self, make_rcp):
+        rcp = make_rcp(sections={"4.1": ["indiqué chez le nouveau-né"]})
+        result = classify(rcp, age=2)
+        assert result.condition_a is False
+        assert result.condition_c is True
+
+
 # ground truth loading
-
-
 class TestLoadGroundTruth:
     def test_loads_correctly(self, ground_truth_csv):
         gt = load_ground_truth(str(ground_truth_csv))
