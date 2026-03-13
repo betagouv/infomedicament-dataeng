@@ -18,25 +18,24 @@ TIE_BREAKER_PRIORITY = {"AB": "AB", "AC": "AC", "BC": "B", "ABC": "AB"}
 # Keywords and matching
 
 PEDIATRIC_KEYWORDS = [
-    "pédiatrie",
+    "pédiatrie",  # <18ans
     "pédiatrique",
-    "enfant",
+    "enfant",  # <18ans
     "enfants",
     "nourrisson",
-    "nourrissons",
+    "nourrissons",  # 28 jours ou 1 mois <> 3 ans (?)
     "nouveau-né",
-    "nouveau-nés",
+    "nouveau-nés",  # 28 jours
     "nouveaux-nés",
-    "prématuré",
+    "prématuré",  # 28 jours
     "prématurés",
-    "infantile",
-    "adolescent",
+    "infantile",  # 1 mois à 2ans/24mois
+    "adolescent",  # 12ans <> 17 ans
     "adolescents",
     "adolescente",
     "adolescentes",
-    "juvénile",
+    "juvénile",  # <18ans
     "juvéniles",
-    "immature",
 ]
 
 # Patterns for age/weight mentions (< 18 years)
@@ -88,11 +87,17 @@ ADULT_RESERVED_PATTERNS = [
     r"reservée?s?\s+a\s+l'adulte",
 ]
 
-# Subsection titles that are headings but not specific content to match
-_HEADING_ONLY_TITLES = {
-    "population pédiatrique",
-    "populations particulières",
-    "posologie",
-    "mode d'administration",
-    "durée du traitement",
-}
+# Subsection titles that are headings but not specific content to match.
+# Matched case-insensitively against the full stripped heading text.
+_HEADING_ONLY_TITLE_PATTERNS = [
+    r"populations?\s+pédiatriques?",
+    r"populations?\s+particulières?",
+    r"posologie",
+    r"mode\s+d['']administration",
+    r"durée\s+du\s+traitement",
+    # Age/weight sub-group headings that carry no classification signal on their own
+    r"enfants?\s+(?:âgés?\s+)?de\s+moins\s+de\s+\d+\s+ans(?:\s+(?:et\s+de\s+moins\s+de|pesant\s+(?:au\s+moins|moins\s+de))\s+\d+\s+kg)?",
+    r"enfants?\s+de\s+\d+\s+à\s+\d+\s+ans(?:\s+pesant\s+(?:au\s+moins|moins\s+de)\s+\d+\s+kg)?",
+    r"adultes?\s+et\s+adolescents?\s*\(\d+\s+ans\s+et\s+plus\)",
+    r"enfants?\s+et\s+adolescents?\s*\(\d+[-–]\d+\s+ans\)",
+]

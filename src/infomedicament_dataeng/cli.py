@@ -465,8 +465,8 @@ def run_pediatric_classification(
                 " | ".join(pred.c_reasons),
                 " | ".join(dict.fromkeys(kw_41_42)),
                 " | ".join(dict.fromkeys(kw_43)),
-                " ||| ".join(m.text[:200] for m in pred.matches_41_42),
-                " ||| ".join(m.text[:200] for m in pred.matches_43),
+                " ||| ".join(m.text for m in pred.matches_41_42),
+                " ||| ".join(m.text for m in pred.matches_43),
             ]
             writer.writerow(row)
 
