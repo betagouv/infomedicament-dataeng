@@ -1,6 +1,7 @@
 """Tests for pediatric classification module."""
 
 from infomedicament_dataeng.pediatric import (
+    _is_heading_label,
     classify,
     extract_section_texts,
     find_pediatric_keywords_in_text,
@@ -10,6 +11,58 @@ from infomedicament_dataeng.pediatric import (
 )
 
 # test helper functions
+
+
+class TestIsHeadingLabel:
+    # --- should be filtered out ---
+    def test_population_pediatrique(self):
+        assert _is_heading_label("Population pédiatrique")
+
+    def test_population_pediatrique_plural(self):
+        assert _is_heading_label("Populations pédiatriques")
+
+    def test_populations_particulieres(self):
+        assert _is_heading_label("Populations particulières")
+
+    def test_posologie(self):
+        assert _is_heading_label("Posologie")
+
+    def test_mode_administration(self):
+        assert _is_heading_label("Mode d'administration")
+
+    def test_duree_traitement(self):
+        assert _is_heading_label("Durée du traitement")
+
+    def test_age_subgroup_less_than_with_weight(self):
+        assert _is_heading_label("Enfants de moins de 6 ans et de moins de 20 kg")
+
+    def test_age_subgroup_range_with_weight(self):
+        assert _is_heading_label("Enfants de 6 à 11 ans pesant au moins 20 kg")
+
+    def test_adults_and_adolescents(self):
+        assert _is_heading_label("Adultes et adolescents (12 ans et plus)")
+
+    def test_children_and_adolescents_range(self):
+        assert _is_heading_label("Enfants et adolescents (7-17 ans)")
+
+    def test_enfants_ages_moins_de(self):
+        assert _is_heading_label("Enfants âgés de moins de 7 ans")
+
+    def test_case_insensitive(self):
+        assert _is_heading_label("POPULATION PÉDIATRIQUE")
+
+    # --- should NOT be filtered out ---
+    def test_clinical_sentence_not_matched(self):
+        assert not _is_heading_label(
+            "Aucune donnée n'étant disponible avec le bisoprolol en pédiatrie, "
+            "son utilisation ne peut donc être recommandée chez les patients pédiatriques."
+        )
+
+    def test_clinical_heading_not_matched(self):
+        assert not _is_heading_label("Réservé au nourrisson et à l'enfant de plus de 3 mois")
+
+    def test_partial_match_not_enough(self):
+        assert not _is_heading_label("Voir rubrique Population pédiatrique ci-dessous")
 
 
 class TestFindPediatricKeywords:
@@ -255,6 +308,33 @@ class TestExtractSectionTexts:
         texts = extract_section_texts(rcp, "4.2")
         assert "Population pédiatrique" not in texts
         assert "Sans objet" in texts
+
+    def test_heading_label_in_corps_texte_gras_skipped(self):
+        """'Population pédiatrique' as AmmCorpsTexteGras (bold label) is also skipped."""
+        rcp = {
+            "source": {"cis": "12345"},
+            "content": [
+                {
+                    "type": "AmmAnnexeTitre1",
+                    "children": [
+                        {
+                            "type": "AmmAnnexeTitre2",
+                            "content": "4.2 Posologie",
+                            "children": [
+                                {"type": "AmmCorpsTexteGras", "content": "Population pédiatrique"},
+                                {
+                                    "type": "AmmCorpsTexte",
+                                    "content": "Aucune donnée n'étant disponible, l'utilisation n'est pas recommandée.",
+                                },
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+        texts = extract_section_texts(rcp, "4.2")
+        assert "Population pédiatrique" not in texts
+        assert "Aucune donnée n'étant disponible, l'utilisation n'est pas recommandée." in texts
 
 
 # ground truth loading

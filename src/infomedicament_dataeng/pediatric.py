@@ -43,6 +43,11 @@ def extract_section_texts(rcp_json: dict, section_prefix: str) -> list[str]:
     return texts
 
 
+def _is_heading_label(text: str) -> bool:
+    """Return True if text is a standalone structural heading with no clinical signal."""
+    return any(re.fullmatch(p, text, re.IGNORECASE) for p in pediatric_config._HEADING_ONLY_TITLE_PATTERNS)
+
+
 def _collect_texts(node: dict, texts: list[str]) -> None:
     """Recursively collect text content from a JSON node."""
     content = node.get("content", "")
@@ -51,18 +56,12 @@ def _collect_texts(node: dict, texts: list[str]) -> None:
     # Skip the section heading itself (AmmAnnexeTitre2)
     if node_type == "AmmAnnexeTitre2":
         pass
-    elif node_type in ("AmmAnnexeTitre3", "AmmAnnexeTitre4"):
-        # Include subsection titles only if they carry clinical info
-        # (e.g. "Réservé au nourrisson et à l'enfant de plus de 3 mois")
-        # Skip generic structural headings
-        if isinstance(content, str) and content.strip().lower() not in pediatric_config._HEADING_ONLY_TITLES:
-            texts.append(content.strip())
-    elif isinstance(content, str) and content.strip():
+    elif isinstance(content, str) and content.strip() and not _is_heading_label(content.strip()):
         texts.append(content.strip())
     elif isinstance(content, list):
         # Bullet list items
         for item in content:
-            if isinstance(item, str) and item.strip():
+            if isinstance(item, str) and item.strip() and not _is_heading_label(item.strip()):
                 texts.append(item.strip())
 
     for child in node.get("children", []):
