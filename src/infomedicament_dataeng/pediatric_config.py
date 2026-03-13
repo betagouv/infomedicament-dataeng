@@ -19,23 +19,23 @@ TIE_BREAKER_PRIORITY = {"AB": "AB", "AC": "AC", "BC": "B", "ABC": "AB"}
 
 PEDIATRIC_KEYWORDS = [
     "pédiatrie",  # <18ans
-    "pédiatrique",
+    "pédiatrique",  # <18ans
     "enfant",  # <18ans
-    "enfants",
-    "nourrisson",
+    "enfants",  # <18ans
+    "nourrisson",  # 28 jours ou 1 mois <> 3 ans (?)
     "nourrissons",  # 28 jours ou 1 mois <> 3 ans (?)
-    "nouveau-né",
+    "nouveau-né",  # 28 jours
     "nouveau-nés",  # 28 jours
-    "nouveaux-nés",
+    "nouveaux-nés",  # 28 jours
     "prématuré",  # 28 jours
-    "prématurés",
+    "prématurés",  # 28 jours
     "infantile",  # 1 mois à 2ans/24mois
     "adolescent",  # 12ans <> 17 ans
-    "adolescents",
-    "adolescente",
-    "adolescentes",
+    "adolescents",  # 12ans <> 17 ans
+    "adolescente",  # 12ans <> 17 ans
+    "adolescentes",  # 12ans <> 17 ans
     "juvénile",  # <18ans
-    "juvéniles",
+    "juvéniles",  # <18ans
 ]
 
 # Patterns for age/weight mentions (< 18 years)
@@ -86,6 +86,29 @@ ADULT_RESERVED_PATTERNS = [
     r"réservée?s?\s+à\s+l\s+adulte",
     r"reservée?s?\s+a\s+l'adulte",
 ]
+
+# Implicit age range (min_year, max_year) for each keyword, used when no explicit
+# age range is present in the text. Age 0 = neonate/newborn.
+KEYWORD_AGE_RANGES: dict[str, tuple[int, int]] = {
+    "pédiatrie": (0, 17),
+    "pédiatrique": (0, 17),
+    "enfant": (0, 17),
+    "enfants": (0, 17),
+    "juvénile": (0, 17),
+    "juvéniles": (0, 17),
+    "nourrisson": (0, 2),
+    "nourrissons": (0, 2),
+    "infantile": (0, 2),
+    "nouveau-né": (0, 0),
+    "nouveau-nés": (0, 0),
+    "nouveaux-nés": (0, 0),
+    "prématuré": (0, 0),
+    "prématurés": (0, 0),
+    "adolescent": (12, 17),
+    "adolescents": (12, 17),
+    "adolescente": (12, 17),
+    "adolescentes": (12, 17),
+}
 
 # Subsection titles that are headings but not specific content to match.
 # Matched case-insensitively against the full stripped heading text.
