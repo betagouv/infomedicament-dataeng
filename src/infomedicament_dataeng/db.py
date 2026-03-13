@@ -2,6 +2,7 @@
 
 import os
 import re
+from collections.abc import Iterable
 
 import psycopg2
 import pymysql
@@ -186,7 +187,7 @@ def _import_one_record(conn, main_table: str, content_table: str, record: dict) 
 
 
 def import_to_postgres(
-    records: list[dict],
+    records: Iterable[dict],
     main_table: str,
     content_table: str,
     config: PostgresConfig | None = None,
