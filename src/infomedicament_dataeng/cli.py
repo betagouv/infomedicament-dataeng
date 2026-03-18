@@ -7,7 +7,7 @@ import json
 import logging
 import multiprocessing as mp
 import os
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 import chardet
@@ -173,6 +173,7 @@ def traiter_depuis_s3(
     limite: int | None = None,
     pattern: str = "N",
     batch_size: int = 500,
+    staging: bool = False,
 ) -> None:
     """
     Process HTML files from S3 and write results to S3 or locally.
@@ -183,6 +184,8 @@ def traiter_depuis_s3(
         limite: Limit number of files to process (for testing)
         pattern: File pattern to process ("N" for Notices, "R" for RCP)
         batch_size: Number of files to process per batch (to limit memory usage)
+        staging: If True, process only files in the staging subdirectory and move them
+                 to the main prefix after each batch is written.
     """
     config = get_config()
 
@@ -226,8 +229,13 @@ def traiter_depuis_s3(
         return
 
     # List existing files in S3 to avoid NoSuchKey errors
-    logger.info("Listing existing files in S3...")
-    existing_keys = set(s3_client.list_html_files(pattern))
+    staging_prefix = f"{html_prefix}staging/"
+    if staging:
+        logger.info(f"Staging mode — listing files in {staging_prefix}...")
+        existing_keys = set(s3_client.list_staging_html_files(pattern))
+    else:
+        logger.info("Listing existing files in S3...")
+        existing_keys = set(s3_client.list_html_files(pattern))
     existing_filenames = {key.split("/")[-1] for key in existing_keys}
     logger.info(f"{len(existing_filenames)} files exist in S3")
 
@@ -240,7 +248,8 @@ def traiter_depuis_s3(
         return
 
     # Build full S3 keys from filenames
-    html_keys = [f"{html_prefix}{filename}" for filename in files_to_fetch.keys()]
+    key_prefix = staging_prefix if staging else html_prefix
+    html_keys = [f"{key_prefix}{filename}" for filename in files_to_fetch.keys()]
     if limite is not None:
         html_keys = html_keys[:limite]
 
@@ -292,6 +301,15 @@ def traiter_depuis_s3(
                 output_content = "\n".join(json.dumps(r, ensure_ascii=False) for r in batch_results)
                 s3_client.upload_file_content(output_key, output_content, content_type="application/x-ndjson")
                 logger.info(f"Batch {batch_num + 1} written to S3: {output_key} ({len(batch_results)} results)")
+
+        # Move processed files from staging to main prefix
+        if staging:
+            logger.info(f"Moving {len(batch_keys)} files from staging to main prefix...")
+            for staging_key in batch_keys:
+                filename = staging_key.split("/")[-1]
+                main_key = f"{html_prefix}{filename}"
+                s3_client.move_file(staging_key, main_key)
+            logger.info(f"Batch {batch_num + 1}: {len(batch_keys)} files moved to main prefix")
 
     logger.info(f"Processing complete: {total_processed} processed, {total_skipped} skipped")
 
@@ -457,13 +475,14 @@ def run_pediatric_classification(
         print(format_metrics(metrics))
 
 
-def db_import(pattern: str, limite: int | None = None) -> None:
+def db_import(pattern: str, limite: int | None = None, since: date | None = None) -> None:
     """
     Import parsed JSONL files from S3 into PostgreSQL.
 
     Args:
         pattern: "N" for Notices, "R" for RCP.
         limite: Limit total number of records imported (for testing).
+        since: If provided, only import JSONL files dated on or after this date.
     """
     config = get_config()
 
@@ -475,7 +494,7 @@ def db_import(pattern: str, limite: int | None = None) -> None:
     content_table = "notices_content" if pattern == "N" else "rcp_content"
 
     logger.info(f"Listing parsed JSONL files for pattern '{pattern}' from S3...")
-    jsonl_keys = list(s3_client.list_parsed_files(pattern))
+    jsonl_keys = list(s3_client.list_parsed_files(pattern, since=since))
     logger.info(f"Found {len(jsonl_keys)} files to import into '{main_table}'")
 
     total_imported = 0
@@ -571,6 +590,11 @@ Environment variables for database:
     s3_parser.add_argument("--limite", type=int, help="Limit number of files to process")
     s3_parser.add_argument("--pattern", default="N", choices=["N", "R"], help="N=Notice, R=RCP")
     s3_parser.add_argument("--batch-size", type=int, default=500, help="Files per batch (default: 500)")
+    s3_parser.add_argument(
+        "--staging",
+        action="store_true",
+        help="Process only files in the staging subdirectory and move them to the main prefix after parsing",
+    )
 
     # SQL to CSV mode
     sql_parser = subparsers.add_parser("sql-to-csv", help="Convert SQL INSERT statements to CSV")
@@ -583,6 +607,12 @@ Environment variables for database:
     db_import_parser = subparsers.add_parser("db-import", help="Import parsed JSONL files from S3 into PostgreSQL")
     db_import_parser.add_argument("--pattern", required=True, choices=["N", "R"], help="N=Notice, R=RCP")
     db_import_parser.add_argument("--limite", type=int, help="Limit number of records to import (for testing)")
+    db_import_parser.add_argument(
+        "--since",
+        type=lambda s: datetime.strptime(s, "%Y-%m-%d").date(),
+        metavar="YYYY-MM-DD",
+        help="Only import JSONL files whose filename timestamp is on or after this date",
+    )
 
     # Import from data.gouv.fr mode
     datagouv_parser = subparsers.add_parser("import-datagouv", help="Import datasets from data.gouv.fr into PostgreSQL")
@@ -633,6 +663,7 @@ Environment variables for database:
                 limite=args.limite,
                 pattern=args.pattern,
                 batch_size=args.batch_size,
+                staging=args.staging,
             )
         except Exception as e:
             logger.exception(f"Error: {e}")
@@ -648,7 +679,7 @@ Environment variables for database:
 
     elif args.command == "db-import":
         try:
-            db_import(args.pattern, limite=args.limite)
+            db_import(args.pattern, limite=args.limite, since=args.since)
         except Exception as e:
             logger.exception(f"Error: {e}")
             raise SystemExit(1)

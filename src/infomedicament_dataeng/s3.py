@@ -1,6 +1,7 @@
 """S3/Cellar operations for reading and writing files."""
 
 import logging
+from datetime import date, datetime
 from typing import Iterator
 
 import boto3
@@ -91,12 +92,13 @@ class S3Client:
         )
         logger.info(f"Uploaded {key} to S3")
 
-    def list_parsed_files(self, pattern: str) -> Iterator[str]:
+    def list_parsed_files(self, pattern: str, since: date | None = None) -> Iterator[str]:
         """
         List parsed JSONL files in the output prefix matching the pattern.
 
         Args:
             pattern: "N" for Notice files, "R" for RCP files
+            since: If provided, only yield files whose filename timestamp is on or after this date.
 
         Yields:
             Object keys for matching JSONL files
@@ -107,8 +109,53 @@ class S3Client:
             for obj in page.get("Contents", []):
                 key = obj["Key"]
                 filename = key.split("/")[-1]
-                if filename.startswith(f"parsed_{pattern}_") and filename.endswith(".jsonl"):
+                if not (filename.startswith(f"parsed_{pattern}_") and filename.endswith(".jsonl")):
+                    continue
+                if since is not None:
+                    # filename format: parsed_N_20260318_120000_batch001.jsonl
+                    try:
+                        file_date = datetime.strptime(filename.split("_")[2], "%Y%m%d").date()
+                        if file_date < since:
+                            continue
+                    except (IndexError, ValueError):
+                        pass  # unparseable filename: include it (fail-open)
+                yield key
+
+    def list_staging_html_files(self, pattern: str) -> Iterator[str]:
+        """
+        List HTML files in the staging subdirectory for the given pattern.
+
+        Args:
+            pattern: "N" for Notice files, "R" for RCP files
+
+        Yields:
+            Object keys for matching HTML files in the staging subdirectory
+        """
+        html_prefix = self.config.notice_prefix if pattern == "N" else self.config.rcp_prefix
+        staging_prefix = f"{html_prefix}staging/"
+
+        paginator = self.client.get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=self.config.bucket_name, Prefix=staging_prefix):
+            for obj in page.get("Contents", []):
+                key = obj["Key"]
+                if key.endswith(".htm") or key.endswith(".html"):
                     yield key
+
+    def move_file(self, source_key: str, dest_key: str) -> None:
+        """
+        Move a file within the bucket (copy + delete, as S3 has no native move).
+
+        Args:
+            source_key: The source S3 object key
+            dest_key: The destination S3 object key
+        """
+        self.client.copy_object(
+            Bucket=self.config.bucket_name,
+            CopySource={"Bucket": self.config.bucket_name, "Key": source_key},
+            Key=dest_key,
+        )
+        self.client.delete_object(Bucket=self.config.bucket_name, Key=source_key)
+        logger.info(f"Moved {source_key} → {dest_key}")
 
     def get_filename_from_key(self, key: str) -> str:
         """Extract the filename from an S3 key."""
