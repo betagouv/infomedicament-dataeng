@@ -62,10 +62,15 @@ Options:
 - `--limite`: Limit number of files to process (for testing)
 - `--pattern`: File pattern - N=Notice, R=RCP (default: N)
 - `--batch-size`: Files per batch (default: 500). Results are written after each batch to limit memory usage.
+- `--staging`: Process only files in the staging subdirectory (`imports/notice/staging/` or `imports/rcp/staging/`). After each batch is parsed, files are moved to the main prefix.
 
 Example:
 ```bash
+# Full reprocessing of all files
 poetry run infomedicament-dataeng s3 --pattern R --limite 100
+
+# Delta: parse only newly uploaded files from staging
+poetry run infomedicament-dataeng s3 --pattern N --staging
 ```
 
 #### Global Options
@@ -83,17 +88,21 @@ poetry run infomedicament-dataeng db-import --pattern <N|R> [options]
 Options:
 - `--pattern`: N=Notices, R=RCPs (required)
 - `--limite`: Limit number of records to import (for testing)
+- `--since YYYY-MM-DD`: Only import JSONL files whose filename timestamp is on or after this date.
 
 Example:
 ```bash
 # Import all RCP records
 poetry run infomedicament-dataeng db-import --pattern R
 
+# Import only JSONL files produced on or after a given date
+poetry run infomedicament-dataeng db-import --pattern N --since 2026-03-18
+
 # Test with 10 records
 poetry run infomedicament-dataeng db-import --pattern N --limite 10
 ```
 
-The command lists all `parsed_<pattern>_*.jsonl` files under `S3_OUTPUT_PREFIX`, downloads each one, and upserts the records into PostgreSQL (by `codeCIS`). Existing content trees are deleted before re-inserting.
+The command lists `parsed_<pattern>_*.jsonl` files under `S3_OUTPUT_PREFIX`, downloads each one, and upserts the records into PostgreSQL (by `codeCIS`). Existing content trees are deleted before re-inserting.
 
 ### SQL to CSV Conversion
 
@@ -206,6 +215,27 @@ datasets:
 
 The table must be created first via a Kysely migration in the [`infomedicament`](https://github.com/betagouv/infomed) NextJS project.
 
+## Delta workflow (monthly updates)
+
+When only a small number of new or updated HTML files arrive, avoid reprocessing everything:
+
+1. **Upload new HTML files to the staging subdirectory** (instead of the main prefix):
+   - Notices: `imports/notice/staging/`
+   - RCPs: `imports/rcp/staging/`
+
+2. **Parse only the staged files:**
+   ```bash
+   poetry run infomedicament-dataeng s3 --pattern N --staging
+   poetry run infomedicament-dataeng s3 --pattern R --staging
+   ```
+   Files are automatically moved from staging to the main prefix after each batch.
+
+3. **Import only the new JSONL output:**
+   ```bash
+   poetry run infomedicament-dataeng db-import --pattern N --since YYYY-MM-DD
+   poetry run infomedicament-dataeng db-import --pattern R --since YYYY-MM-DD
+   ```
+
 ## Configuration
 
 ### S3/Cellar
@@ -264,19 +294,25 @@ scalingo --app your-app scale web:0
 Run tasks as one-off containers:
 
 ```bash
-# Parse Notice files (N*.htm)
-scalingo --app your-app run --size 2XL "python -m infomedicament_dataeng.cli s3 --pattern N --batch-size 1000"
+# Delta parse: only staged files (recommended for monthly updates)
+scalingo --app your-app run --size 2XL "python -m infomedicament_dataeng.cli s3 --pattern N --staging"
+scalingo --app your-app run --size 2XL "python -m infomedicament_dataeng.cli s3 --pattern R --staging"
 
-# Parse RCP files (R*.htm)
+# Full reparse: all files (initial load or full reprocessing)
+scalingo --app your-app run --size 2XL "python -m infomedicament_dataeng.cli s3 --pattern N --batch-size 1000"
 scalingo --app your-app run --size 2XL "python -m infomedicament_dataeng.cli s3 --pattern R --batch-size 1000"
 
 # Test with a limit
 scalingo --app your-app run "python -m infomedicament_dataeng.cli s3 --pattern N --limite 10"
 
-# Import Notices into PostgreSQL
-scalingo --app your-app run "python -m infomedicament_dataeng.cli db-import --pattern N"
+# Import Notices into PostgreSQL (delta: only today's JSONL files)
+scalingo --app your-app run "python -m infomedicament_dataeng.cli db-import --pattern N --since $(date +%Y-%m-%d)"
 
-# Import RCPs into PostgreSQL
+# Import RCPs into PostgreSQL (delta)
+scalingo --app your-app run "python -m infomedicament_dataeng.cli db-import --pattern R --since $(date +%Y-%m-%d)"
+
+# Full import: all JSONL files
+scalingo --app your-app run "python -m infomedicament_dataeng.cli db-import --pattern N"
 scalingo --app your-app run "python -m infomedicament_dataeng.cli db-import --pattern R"
 ```
 
