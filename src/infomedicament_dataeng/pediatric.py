@@ -13,6 +13,7 @@ It does not use any machine learning or external data sources.
 import csv
 import re
 from dataclasses import dataclass, field
+from types import FunctionType
 
 from infomedicament_dataeng import pediatric_config
 
@@ -45,7 +46,8 @@ def extract_section_texts(rcp_json: dict, section_prefix: str) -> list[str]:
 
 def _is_heading_label(text: str) -> bool:
     """Return True if text is a standalone structural heading with no clinical signal."""
-    return any(re.fullmatch(p, text, re.IGNORECASE) for p in pediatric_config._HEADING_ONLY_TITLE_PATTERNS)
+    normalized = text.strip().lstrip("·•-– ").rstrip(": ")
+    return any(re.fullmatch(p, normalized, re.IGNORECASE) for p in pediatric_config._HEADING_ONLY_TITLE_PATTERNS)
 
 
 def _collect_texts(node: dict, texts: list[str]) -> None:
@@ -142,7 +144,7 @@ class PediatricClassification:
 
 # Each tuple: (compiled regex, handler) where handler(m) -> (min_year, max_year)
 # Patterns are tried in order; first match wins.
-_AGE_RANGE_PATTERNS: list[tuple[re.Pattern, object]] = [
+_AGE_RANGE_PATTERNS: list[tuple[re.Pattern, FunctionType]] = [
     # "moins de N mois" / "< N mois" → all sub-year: (0, 0)
     (re.compile(r"(?:moins\s*de|<\s*)\s*\d+\s*mois", re.IGNORECASE), lambda m: (0, 0)),
     # "<= N ans"
