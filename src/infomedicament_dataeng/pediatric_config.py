@@ -13,7 +13,7 @@ POSITIVE_INDICATION_PATTERNS = [
 ]
 
 # This helps us decide how to handle cases where more than 1 conditions are met.
-TIE_BREAKER_PRIORITY = {"AB": "AB", "AC": "AC", "BC": "B", "ABC": "AB"}
+TIE_BREAKER_PRIORITY = {"AB": "AB", "AC": "A", "BC": "B", "ABC": "AB"}
 
 # Keywords and matching
 
@@ -58,16 +58,19 @@ NEGATIVE_PATTERNS = [
     r"ne doivent pas être utilisée?s?",
     r"n'est pas indiquée?",
     r"ne sont pas indiquée?s?",
-    r"n'est pas recommandée?",
-    r"ne sont pas recommandée?s?",
+    r"n'est (?:\w+\s+)?pas recommandée?",
+    r"ne sont (?:\w+\s+)?pas recommandée?s?",
     r"pas recommandable",
-    r"sécurité.*?efficacité.*?n'ont pas été",
-    r"sécurité.*?efficacité.*?n'a pas été",
-    r"sécurité.*?efficacité.*?n'a\s*/\s*n'ont pas été",
-    r"tolérance.*?efficacité.*?n'ont pas été",
-    r"tolérance.*?efficacité.*?n'a pas été",
-    r"n'a pas été suffisamment démontrée?",
-    r"n'a pas été étudiée?",
+    r"efficacité.*?sécurité.*?n'ont pas (?:encore )?été",
+    r"efficacité.*?sécurité.*?n'a pas (?:encore )?été",
+    r"efficacité.*?sécurité.*?n'a\s*/\s*n'ont pas (?:encore )?été",
+    r"sécurité.*?efficacité.*?n'ont pas (?:encore )?été",
+    r"sécurité.*?efficacité.*?n'a pas (?:encore )?été",
+    r"sécurité.*?efficacité.*?n'a\s*/\s*n'ont pas (?:encore )?été",
+    r"tolérance.*?efficacité.*?n'ont pas (?:encore )?été",
+    r"tolérance.*?efficacité.*?n'a pas (?:encore )?été",
+    r"n'a pas (?:encore )?été suffisamment démontrée?",
+    r"n'a pas (?:encore )?été étudiée?",
     r"n'est pas justifiée?",
     r"il n'existe pas d'utilisation justifiée?",
     r"est déconseillée?",
@@ -79,6 +82,10 @@ NEGATIVE_PATTERNS = [
     r"en l'absence de données?",
     r"absence d'expérience",
     r"sans objet",
+    r"est contre-indiquée?",
+    r"il existe d'autres formes",
+    r"n'ont pas permis de démontrer",
+    r"ne soutiennent pas son utilisation",
 ]
 
 ADULT_RESERVED_PATTERNS = [
@@ -122,5 +129,7 @@ _HEADING_ONLY_TITLE_PATTERNS = [
     r"enfants?\s+(?:âgés?\s+)?de\s+moins\s+de\s+\d+\s+ans(?:\s+(?:et\s+de\s+moins\s+de|pesant\s+(?:au\s+moins|moins\s+de))\s+\d+\s+kg)?",
     r"enfants?\s+de\s+\d+\s+à\s+\d+\s+ans(?:\s+pesant\s+(?:au\s+moins|moins\s+de)\s+\d+\s+kg)?",
     r"adultes?\s+et\s+adolescents?\s*\(\d+\s+ans\s+et\s+plus\)",
-    r"enfants?\s+et\s+adolescents?\s*\(\d+[-–]\d+\s+ans\)",
+    r"enfants?\s+et\s+adolescents?\s*\(\d+(?:[-–]|\s+à\s+)\d+\s+ans\)",
+    # Standalone pediatric keyword headings with no clinical sentence
+    r"(?:nouveau-nés?|nouveaux-nés?|nourrissons?|prématurés?|enfants?|adolescentes?s?|pédiatrie|pédiatrique|infantile|juvéniles?)",
 ]

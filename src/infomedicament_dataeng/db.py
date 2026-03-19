@@ -34,7 +34,11 @@ def get_cis_atc_mapping(config: PostgresConfig | None = None) -> dict[str, str]:
     )
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT code_cis, code_terme_atc FROM cis_atc")
+            cur.execute("""
+                SELECT ca.code_cis, a.code
+                FROM cis_atc ca
+                JOIN atc a ON ca.code_terme_atc = a.code_terme
+            """)
             return {str(row[0]): row[1] for row in cur.fetchall()}
     finally:
         conn.close()

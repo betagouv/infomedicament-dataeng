@@ -53,6 +53,12 @@ class TestIsHeadingLabel:
     def test_case_insensitive(self):
         assert _is_heading_label("POPULATION PÉDIATRIQUE")
 
+    def test_trailing_colon_stripped(self):
+        assert _is_heading_label("Population pédiatrique :")
+
+    def test_leading_bullet_stripped(self):
+        assert _is_heading_label("· Population pédiatrique")
+
     # --- should NOT be filtered out ---
     def test_clinical_sentence_not_matched(self):
         assert not _is_heading_label(
@@ -114,6 +120,33 @@ class TestMatchesNegativePattern:
 
     def test_matches_aucune_donnee(self):
         text = "Aucune donnée n'est disponible en pédiatrie"
+        assert matches_negative_pattern(text) is not None
+
+    def test_matches_il_existe_autres_formes(self):
+        text = (
+            "Il existe d'autres formes pharmaceutiques de racécadotril"
+            " adaptées à l'administration dans la population pédiatrique."
+        )
+        assert matches_negative_pattern(text) is not None
+
+    def test_matches_pas_permis_de_demontrer(self):
+        text = (
+            "Les études cliniques contrôlées chez les enfants et les adolescents"
+            " présentant un épisode dépressif majeur n'ont pas permis de démontrer"
+            " l'efficacité de la venlafaxine et ne soutiennent pas son utilisation"
+            " chez ces patients (voir rubriques 4.4 et 4.8)."
+        )
+        assert matches_negative_pattern(text) is not None
+
+    def test_matches_donc_pas_recommande(self):
+        text = "MOVIPREP n'est donc pas recommandé chez les enfants de moins de 18 ans."
+        assert matches_negative_pattern(text) is not None
+
+    def test_matches_pas_encore_ete_etablies(self):
+        text = (
+            "La sécurité et l'efficacité de VESICARE chez les enfants"
+            " n'ont pas encore été établies, VESICARE ne doit pas être prescrit chez l'enfant."
+        )
         assert matches_negative_pattern(text) is not None
 
     def test_no_match_positive(self):
@@ -300,7 +333,7 @@ class TestExtractSectionTexts:
                             "content": "4.2 Posologie",
                             "children": [
                                 {"type": "AmmAnnexeTitre3", "content": "Population pédiatrique"},
-                                {"type": "AmmCorpsTexte", "content": "Sans objet"},
+                                {"type": "AmmCorpsTexte", "content": "Chez l'enfant : sans objet."},
                             ],
                         }
                     ],
@@ -309,7 +342,7 @@ class TestExtractSectionTexts:
         }
         texts = extract_section_texts(rcp, "4.2")
         assert "Population pédiatrique" not in texts
-        assert "Sans objet" in texts
+        assert "Chez l'enfant : sans objet." in texts
 
     def test_heading_label_in_corps_texte_gras_skipped(self):
         """'Population pédiatrique' as AmmCorpsTexteGras (bold label) is also skipped."""
@@ -465,6 +498,40 @@ class TestClassifyWithAge:
         result = classify(rcp, age=2)
         assert result.condition_a is False
         assert result.condition_c is True
+
+
+class TestShortTextIgnored:
+    def test_short_heading_ignored(self, make_rcp):
+        """A block with fewer than 5 words containing a pediatric keyword must be ignored."""
+        rcp = make_rcp(sections={"4.1": ["Population pédiatrique"]})
+        result = classify(rcp)
+        assert result.condition_a is False
+        assert "pas de mention pédiatrique en 4.1/4.2" in result.c_reasons
+
+    def test_short_age_heading_ignored(self, make_rcp):
+        """'Enfants et adolescents (7 à 17 ans)' is a heading, must be ignored."""
+        rcp = make_rcp(sections={"4.1": ["Enfants et adolescents (7 à 17 ans)"]})
+        result = classify(rcp)
+        assert result.condition_a is False
+
+    def test_single_word_heading_ignored(self, make_rcp):
+        """A single-word block like 'Enfants' must be ignored."""
+        rcp = make_rcp(sections={"4.1": ["Enfants"]})
+        result = classify(rcp)
+        assert result.condition_a is False
+
+    def test_long_text_with_keyword_not_ignored(self, make_rcp):
+        """A block with 5+ words containing a keyword must be processed normally."""
+        rcp = make_rcp(sections={"4.1": ["Indiqué chez l'enfant de plus de 6 ans"]})
+        result = classify(rcp)
+        assert result.condition_a is True
+
+    def test_short_keyword_ignored_no_a_reasons(self, make_rcp):
+        """A block with 5+ words containing a keyword must be processed normally."""
+        rcp = make_rcp(sections={"4.2": ["Enfants"]})
+        result = classify(rcp)
+        assert result.condition_a is False
+        assert result.a_reasons == []
 
 
 # ground truth loading
