@@ -2,6 +2,7 @@
 
 import os
 import re
+from collections.abc import Iterable
 
 import psycopg2
 import pymysql
@@ -33,7 +34,11 @@ def get_cis_atc_mapping(config: PostgresConfig | None = None) -> dict[str, str]:
     )
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT code_cis, code_terme_atc FROM cis_atc")
+            cur.execute("""
+                SELECT ca.code_cis, a.code
+                FROM cis_atc ca
+                JOIN atc a ON ca.code_terme_atc = a.code_terme
+            """)
             return {str(row[0]): row[1] for row in cur.fetchall()}
     finally:
         conn.close()
@@ -186,7 +191,7 @@ def _import_one_record(conn, main_table: str, content_table: str, record: dict) 
 
 
 def import_to_postgres(
-    records: list[dict],
+    records: Iterable[dict],
     main_table: str,
     content_table: str,
     config: PostgresConfig | None = None,

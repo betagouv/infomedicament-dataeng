@@ -1,15 +1,76 @@
 """Tests for pediatric classification module."""
 
 from infomedicament_dataeng.pediatric import (
+    _is_heading_label,
     classify,
     extract_section_texts,
     find_pediatric_keywords_in_text,
     is_adult_reserved,
     load_ground_truth,
     matches_negative_pattern,
+    parse_explicit_age_range,
+    text_block_covers_age,
 )
 
 # test helper functions
+
+
+class TestIsHeadingLabel:
+    # --- should be filtered out ---
+    def test_population_pediatrique(self):
+        assert _is_heading_label("Population pédiatrique")
+
+    def test_population_pediatrique_plural(self):
+        assert _is_heading_label("Populations pédiatriques")
+
+    def test_populations_particulieres(self):
+        assert _is_heading_label("Populations particulières")
+
+    def test_posologie(self):
+        assert _is_heading_label("Posologie")
+
+    def test_mode_administration(self):
+        assert _is_heading_label("Mode d'administration")
+
+    def test_duree_traitement(self):
+        assert _is_heading_label("Durée du traitement")
+
+    def test_age_subgroup_less_than_with_weight(self):
+        assert _is_heading_label("Enfants de moins de 6 ans et de moins de 20 kg")
+
+    def test_age_subgroup_range_with_weight(self):
+        assert _is_heading_label("Enfants de 6 à 11 ans pesant au moins 20 kg")
+
+    def test_adults_and_adolescents(self):
+        assert _is_heading_label("Adultes et adolescents (12 ans et plus)")
+
+    def test_children_and_adolescents_range(self):
+        assert _is_heading_label("Enfants et adolescents (7-17 ans)")
+
+    def test_enfants_ages_moins_de(self):
+        assert _is_heading_label("Enfants âgés de moins de 7 ans")
+
+    def test_case_insensitive(self):
+        assert _is_heading_label("POPULATION PÉDIATRIQUE")
+
+    def test_trailing_colon_stripped(self):
+        assert _is_heading_label("Population pédiatrique :")
+
+    def test_leading_bullet_stripped(self):
+        assert _is_heading_label("· Population pédiatrique")
+
+    # --- should NOT be filtered out ---
+    def test_clinical_sentence_not_matched(self):
+        assert not _is_heading_label(
+            "Aucune donnée n'étant disponible avec le bisoprolol en pédiatrie, "
+            "son utilisation ne peut donc être recommandée chez les patients pédiatriques."
+        )
+
+    def test_clinical_heading_not_matched(self):
+        assert not _is_heading_label("Réservé au nourrisson et à l'enfant de plus de 3 mois")
+
+    def test_partial_match_not_enough(self):
+        assert not _is_heading_label("Voir rubrique Population pédiatrique ci-dessous")
 
 
 class TestFindPediatricKeywords:
@@ -59,6 +120,33 @@ class TestMatchesNegativePattern:
 
     def test_matches_aucune_donnee(self):
         text = "Aucune donnée n'est disponible en pédiatrie"
+        assert matches_negative_pattern(text) is not None
+
+    def test_matches_il_existe_autres_formes(self):
+        text = (
+            "Il existe d'autres formes pharmaceutiques de racécadotril"
+            " adaptées à l'administration dans la population pédiatrique."
+        )
+        assert matches_negative_pattern(text) is not None
+
+    def test_matches_pas_permis_de_demontrer(self):
+        text = (
+            "Les études cliniques contrôlées chez les enfants et les adolescents"
+            " présentant un épisode dépressif majeur n'ont pas permis de démontrer"
+            " l'efficacité de la venlafaxine et ne soutiennent pas son utilisation"
+            " chez ces patients (voir rubriques 4.4 et 4.8)."
+        )
+        assert matches_negative_pattern(text) is not None
+
+    def test_matches_donc_pas_recommande(self):
+        text = "MOVIPREP n'est donc pas recommandé chez les enfants de moins de 18 ans."
+        assert matches_negative_pattern(text) is not None
+
+    def test_matches_pas_encore_ete_etablies(self):
+        text = (
+            "La sécurité et l'efficacité de VESICARE chez les enfants"
+            " n'ont pas encore été établies, VESICARE ne doit pas être prescrit chez l'enfant."
+        )
         assert matches_negative_pattern(text) is not None
 
     def test_no_match_positive(self):
@@ -245,7 +333,7 @@ class TestExtractSectionTexts:
                             "content": "4.2 Posologie",
                             "children": [
                                 {"type": "AmmAnnexeTitre3", "content": "Population pédiatrique"},
-                                {"type": "AmmCorpsTexte", "content": "Sans objet"},
+                                {"type": "AmmCorpsTexte", "content": "Chez l'enfant : sans objet."},
                             ],
                         }
                     ],
@@ -254,12 +342,199 @@ class TestExtractSectionTexts:
         }
         texts = extract_section_texts(rcp, "4.2")
         assert "Population pédiatrique" not in texts
-        assert "Sans objet" in texts
+        assert "Chez l'enfant : sans objet." in texts
+
+    def test_heading_label_in_corps_texte_gras_skipped(self):
+        """'Population pédiatrique' as AmmCorpsTexteGras (bold label) is also skipped."""
+        rcp = {
+            "source": {"cis": "12345"},
+            "content": [
+                {
+                    "type": "AmmAnnexeTitre1",
+                    "children": [
+                        {
+                            "type": "AmmAnnexeTitre2",
+                            "content": "4.2 Posologie",
+                            "children": [
+                                {"type": "AmmCorpsTexteGras", "content": "Population pédiatrique"},
+                                {
+                                    "type": "AmmCorpsTexte",
+                                    "content": "Aucune donnée n'étant disponible, l'utilisation n'est pas recommandée.",
+                                },
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+        texts = extract_section_texts(rcp, "4.2")
+        assert "Population pédiatrique" not in texts
+        assert "Aucune donnée n'étant disponible, l'utilisation n'est pas recommandée." in texts
+
+
+class TestParseExplicitAgeRange:
+    def test_moins_de_N_ans(self):
+        assert parse_explicit_age_range("moins de 6 ans") == (0, 5)
+
+    def test_moins_de_N_ans_in_sentence(self):
+        assert parse_explicit_age_range("patients âgés de moins de 12 ans") == (0, 11)
+
+    def test_a_partir_de_N_ans(self):
+        assert parse_explicit_age_range("à partir de 12 ans") == (12, 17)
+
+    def test_plus_de_N_ans(self):
+        assert parse_explicit_age_range("plus de 15 ans") == (15, 17)
+
+    def test_N_ans_et_plus(self):
+        assert parse_explicit_age_range("12 ans et plus") == (12, 17)
+
+    def test_de_N_a_M_ans(self):
+        assert parse_explicit_age_range("de 6 à 11 ans") == (6, 11)
+
+    def test_N_a_M_ans(self):
+        assert parse_explicit_age_range("6 à 11 ans") == (6, 11)
+
+    def test_N_tiret_M_ans(self):
+        assert parse_explicit_age_range("7-17 ans") == (7, 17)
+
+    def test_lt_N_ans(self):
+        assert parse_explicit_age_range("< 6 ans") == (0, 5)
+
+    def test_lte_N_ans(self):
+        assert parse_explicit_age_range("<= 6 ans") == (0, 6)
+
+    def test_gte_N_ans(self):
+        assert parse_explicit_age_range(">= 12 ans") == (12, 17)
+
+    def test_moins_de_N_mois(self):
+        assert parse_explicit_age_range("moins de 6 mois") == (0, 0)
+
+    def test_moins_de_24_mois(self):
+        assert parse_explicit_age_range("moins de 24 mois") == (0, 0)
+
+    def test_no_match_keyword_only(self):
+        assert parse_explicit_age_range("indiqué chez l'enfant") is None
+
+    def test_no_match_empty(self):
+        assert parse_explicit_age_range("") is None
+
+
+class TestTextBlockCoversAge:
+    def test_explicit_range_covers(self):
+        assert text_block_covers_age("indiqué de 6 à 11 ans", 8)
+
+    def test_explicit_range_excludes(self):
+        assert not text_block_covers_age("indiqué de 6 à 11 ans", 12)
+
+    def test_explicit_range_overrides_broad_keyword(self):
+        # "enfant" alone would cover 0-17, but explicit range narrows it
+        assert not text_block_covers_age("enfants de 6 à 11 ans : 10 mg/jour", 4)
+
+    def test_keyword_nourrisson_covers(self):
+        assert text_block_covers_age("chez le nourrisson", 1)
+
+    def test_keyword_nourrisson_excludes(self):
+        assert not text_block_covers_age("chez le nourrisson", 5)
+
+    def test_keyword_adolescent_covers(self):
+        assert text_block_covers_age("chez l'adolescent", 14)
+
+    def test_keyword_adolescent_excludes(self):
+        assert not text_block_covers_age("chez l'adolescent", 10)
+
+    def test_keyword_enfant_covers_all_pediatric(self):
+        assert text_block_covers_age("chez l'enfant", 5)
+
+    def test_keyword_nouveau_ne_covers_neonate(self):
+        assert text_block_covers_age("chez le nouveau-né", 0)
+
+    def test_keyword_nouveau_ne_excludes_older(self):
+        assert not text_block_covers_age("chez le nouveau-né", 1)
+
+    def test_no_pediatric_signal(self):
+        assert not text_block_covers_age("traitement de l'hypertension artérielle", 5)
+
+
+class TestClassifyWithAge:
+    def test_age_filters_in_matching_block(self, make_rcp):
+        rcp = make_rcp(sections={"4.1": ["enfants de 6 à 11 ans : 10 mg/jour"]})
+        assert classify(rcp, age=8).condition_a is True
+
+    def test_age_filters_out_non_matching_block(self, make_rcp):
+        rcp = make_rcp(sections={"4.1": ["enfants de 6 à 11 ans : 10 mg/jour"]})
+        result = classify(rcp, age=12)
+        assert result.condition_a is False
+        assert result.condition_c is True
+
+    def test_age_none_keeps_existing_behavior(self, make_rcp):
+        rcp = make_rcp(sections={"4.1": ["Ce médicament est indiqué chez l'enfant de plus de 6 ans"]})
+        assert classify(rcp, age=None).condition_a is True
+
+    def test_age_filters_43_in_range(self, make_rcp):
+        rcp = make_rcp(sections={"4.3": ["Contre-indiqué chez le nourrisson"]})
+        assert classify(rcp, age=0).condition_b is True
+
+    def test_age_filters_43_out_of_range(self, make_rcp):
+        rcp = make_rcp(sections={"4.3": ["Contre-indiqué chez le nourrisson"]})
+        result = classify(rcp, age=5)
+        assert result.condition_b is False
+
+    def test_adolescent_keyword_covers_matching_age(self, make_rcp):
+        rcp = make_rcp(sections={"4.1": ["Ce médicament est indiqué chez l'adolescent"]})
+        assert classify(rcp, age=14).condition_a is True
+
+    def test_adolescent_keyword_excludes_young_child(self, make_rcp):
+        rcp = make_rcp(sections={"4.1": ["Ce médicament est indiqué chez l'adolescent"]})
+        result = classify(rcp, age=8)
+        assert result.condition_a is False
+        assert result.condition_c is True
+
+    def test_neonate_age_0(self, make_rcp):
+        rcp = make_rcp(sections={"4.1": ["indiqué chez le nouveau-né"]})
+        assert classify(rcp, age=0).condition_a is True
+
+    def test_neonate_keyword_excludes_age_2(self, make_rcp):
+        rcp = make_rcp(sections={"4.1": ["indiqué chez le nouveau-né"]})
+        result = classify(rcp, age=2)
+        assert result.condition_a is False
+        assert result.condition_c is True
+
+
+class TestShortTextIgnored:
+    def test_short_heading_ignored(self, make_rcp):
+        """A block with fewer than 5 words containing a pediatric keyword must be ignored."""
+        rcp = make_rcp(sections={"4.1": ["Population pédiatrique"]})
+        result = classify(rcp)
+        assert result.condition_a is False
+        assert "pas de mention pédiatrique en 4.1/4.2" in result.c_reasons
+
+    def test_short_age_heading_ignored(self, make_rcp):
+        """'Enfants et adolescents (7 à 17 ans)' is a heading, must be ignored."""
+        rcp = make_rcp(sections={"4.1": ["Enfants et adolescents (7 à 17 ans)"]})
+        result = classify(rcp)
+        assert result.condition_a is False
+
+    def test_single_word_heading_ignored(self, make_rcp):
+        """A single-word block like 'Enfants' must be ignored."""
+        rcp = make_rcp(sections={"4.1": ["Enfants"]})
+        result = classify(rcp)
+        assert result.condition_a is False
+
+    def test_long_text_with_keyword_not_ignored(self, make_rcp):
+        """A block with 5+ words containing a keyword must be processed normally."""
+        rcp = make_rcp(sections={"4.1": ["Indiqué chez l'enfant de plus de 6 ans"]})
+        result = classify(rcp)
+        assert result.condition_a is True
+
+    def test_short_keyword_ignored_no_a_reasons(self, make_rcp):
+        """A block with 5+ words containing a keyword must be processed normally."""
+        rcp = make_rcp(sections={"4.2": ["Enfants"]})
+        result = classify(rcp)
+        assert result.condition_a is False
+        assert result.a_reasons == []
 
 
 # ground truth loading
-
-
 class TestLoadGroundTruth:
     def test_loads_correctly(self, ground_truth_csv):
         gt = load_ground_truth(str(ground_truth_csv))

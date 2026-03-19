@@ -319,6 +319,7 @@ def run_pediatric_classification(
     truth_path: str | None,
     output_path: str,
     debug: bool = False,
+    age: int | None = None,
 ) -> None:
     """Run pediatric classification on parsed RCPs and optionally evaluate."""
     from .db import get_cis_atc_mapping
@@ -366,7 +367,7 @@ def run_pediatric_classification(
         rcp_json = rcp_by_cis.get(cis)
         if rcp_json:
             atc_code = atc_mapping.get(cis, "")
-            predictions.append(classify(rcp_json, atc_code=atc_code))
+            predictions.append(classify(rcp_json, atc_code=atc_code, age=age))
         else:
             predictions.append(None)
             missing_rcp += 1
@@ -461,8 +462,8 @@ def run_pediatric_classification(
                 " | ".join(pred.c_reasons),
                 " | ".join(dict.fromkeys(kw_41_42)),
                 " | ".join(dict.fromkeys(kw_43)),
-                " ||| ".join(m.text[:200] for m in pred.matches_41_42),
-                " ||| ".join(m.text[:200] for m in pred.matches_43),
+                " ||| ".join(m.text for m in pred.matches_41_42),
+                " ||| ".join(m.text for m in pred.matches_43),
             ]
             writer.writerow(row)
 
@@ -627,6 +628,9 @@ Environment variables for database:
     ped_parser.add_argument("--truth", help="Ground truth CSV (for evaluation)")
     ped_parser.add_argument("--output", "-o", default="data/predictions.csv", help="Output predictions CSV")
     ped_parser.add_argument("--debug", action="store_true", help="Write debug_sections.jsonl with raw section texts")
+    ped_parser.add_argument(
+        "--age", type=int, default=None, help="Query age in years (0=neonate). If omitted, no age filtering."
+    )
 
     # Global options
     parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose logging")
@@ -693,7 +697,7 @@ Environment variables for database:
 
     elif args.command == "classify-pediatric":
         try:
-            run_pediatric_classification(args.rcp, args.truth, args.output, debug=args.debug)
+            run_pediatric_classification(args.rcp, args.truth, args.output, debug=args.debug, age=args.age)
         except Exception as e:
             logger.exception(f"Error: {e}")
             raise SystemExit(1)
