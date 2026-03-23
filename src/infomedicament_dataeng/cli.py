@@ -19,6 +19,8 @@ from .db import get_authorized_cis, get_filename_to_cis_mapping, import_to_postg
 from .io import charger_liste_cis
 from .opensearch.sections import DEFAULT_INDEX as SECTIONS_DEFAULT_INDEX
 from .opensearch.sections import index_from_local, index_from_s3
+from .opensearch.specialites import DEFAULT_INDEX as SPECIALITES_DEFAULT_INDEX
+from .opensearch.specialites import index_specialites
 from .parser import html_vers_json
 from .s3 import S3Client
 from .sql_to_csv import sql_to_csv
@@ -670,6 +672,13 @@ Environment variables for database:
     )
     sections_parser.add_argument("--limite", type=int, help="Cap on records indexed (for testing)")
 
+    # index-opensearch specialites
+    specialites_parser = os_subparsers.add_parser("specialites", help="Index specialités from PostgreSQL")
+    specialites_parser.add_argument(
+        "--index", default=SPECIALITES_DEFAULT_INDEX, help=f"Index name (default: {SPECIALITES_DEFAULT_INDEX})"
+    )
+    specialites_parser.add_argument("--limite", type=int, help="Cap on documents indexed (for testing)")
+
     # Global options
     parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose logging")
 
@@ -754,6 +763,12 @@ Environment variables for database:
                     since=args.since,
                     limite=args.limite,
                 )
+            except Exception as e:
+                logger.exception(f"Error: {e}")
+                raise SystemExit(1)
+        elif args.target == "specialites":
+            try:
+                index_specialites(index_name=args.index, limite=args.limite)
             except Exception as e:
                 logger.exception(f"Error: {e}")
                 raise SystemExit(1)
