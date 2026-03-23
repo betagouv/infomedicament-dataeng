@@ -31,7 +31,7 @@ INDEX_MAPPING = {
             "analyzer": {
                 "french": {
                     "tokenizer": "standard",
-                    "filter": ["french_elision", "lowercase", "french_stop", "french_stemmer"],
+                    "filter": ["french_elision", "lowercase", "asciifolding", "french_stop", "french_stemmer"],
                 }
             },
         }

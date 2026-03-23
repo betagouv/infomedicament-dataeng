@@ -107,7 +107,37 @@ The command lists `parsed_<pattern>_*.jsonl` files under `S3_OUTPUT_PREFIX`, dow
 
 ### OpenSearch Indexing
 
-Index parsed Notice/RCP sections into OpenSearch to power full-text search. Each section of a notice or RCP becomes one document (~40 sections × ~15k medications ≈ 600k documents), enabling precise section-level search results with a French analyzer (elision, stopwords, stemming).
+Two separate indices power search:
+
+- **`specialites`** — one document per CIS code, used for the main medication search. Matches on specialité name, active substances, pathologies, and ATC classes.
+- **`specialite_sections`** — one document per notice/RCP section, used for deep search within documents.
+
+Both use a French analyzer (elision, stopwords, stemming).
+
+#### Specialités index
+
+```bash
+poetry run infomedicament-dataeng index-opensearch specialites [options]
+```
+
+Options:
+- `--index`: OpenSearch index name (default: `specialites`)
+- `--limite`: Cap on documents indexed (for testing)
+
+Examples:
+```bash
+# Full index from PostgreSQL
+poetry run infomedicament-dataeng index-opensearch specialites
+
+# Test with 100 documents
+poetry run infomedicament-dataeng index-opensearch specialites --limite 100
+```
+
+Re-indexing is idempotent — `_id` is the CIS code, so re-running overwrites existing documents.
+
+#### Sections index
+
+Index parsed Notice/RCP sections into OpenSearch. Each section of a notice or RCP becomes one document (~40 sections × ~15k medications ≈ 600k documents).
 
 ```bash
 poetry run infomedicament-dataeng index-opensearch sections --doc-type <notice|rcp> [options]
@@ -354,6 +384,9 @@ scalingo --app your-app run "python -m infomedicament_dataeng.cli db-import --pa
 # Full import: all JSONL files
 scalingo --app your-app run "python -m infomedicament_dataeng.cli db-import --pattern N"
 scalingo --app your-app run "python -m infomedicament_dataeng.cli db-import --pattern R"
+
+# Index specialités into OpenSearch (full reindex from PostgreSQL)
+scalingo --app your-app run "python -m infomedicament_dataeng.cli index-opensearch specialites"
 
 # Index notices and RCPs into OpenSearch (delta)
 scalingo --app your-app run "python -m infomedicament_dataeng.cli index-opensearch sections --doc-type notice --s3 --since $(date +%Y-%m-%d)"
