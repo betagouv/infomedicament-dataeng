@@ -110,12 +110,12 @@ The command lists `parsed_<pattern>_*.jsonl` files under `S3_OUTPUT_PREFIX`, dow
 Index parsed Notice/RCP sections into OpenSearch to power full-text search. Each section of a notice or RCP becomes one document (~40 sections × ~15k medications ≈ 600k documents), enabling precise section-level search results with a French analyzer (elision, stopwords, stemming).
 
 ```bash
-poetry run infomedicament-dataeng index-opensearch --doc-type <notice|rcp> [options]
+poetry run infomedicament-dataeng index-opensearch sections --doc-type <notice|rcp> [options]
 ```
 
 Options:
 - `--doc-type`: `notice` or `rcp` (required)
-- `--index`: OpenSearch index name (default: `medicaments`)
+- `--index`: OpenSearch index name (default: `specialite_sections`)
 - `--input`: Local JSONL file to index (mutually exclusive with `--s3`)
 - `--s3`: Read from S3 parsed files instead of a local file (mutually exclusive with `--input`)
 - `--since YYYY-MM-DD`: S3 mode only — only index JSONL files dated on or after this date
@@ -124,17 +124,17 @@ Options:
 Examples:
 ```bash
 # Index a local JSONL file (development)
-poetry run infomedicament-dataeng index-opensearch --doc-type notice --input output.jsonl
+poetry run infomedicament-dataeng index-opensearch sections --doc-type notice --input output.jsonl
 
 # Index with a record limit for testing
-poetry run infomedicament-dataeng index-opensearch --doc-type notice --input output.jsonl --limite 100
+poetry run infomedicament-dataeng index-opensearch sections --doc-type notice --input output.jsonl --limite 100
 
 # Index from S3 (production)
-poetry run infomedicament-dataeng index-opensearch --doc-type notice --s3
-poetry run infomedicament-dataeng index-opensearch --doc-type rcp --s3
+poetry run infomedicament-dataeng index-opensearch sections --doc-type notice --s3
+poetry run infomedicament-dataeng index-opensearch sections --doc-type rcp --s3
 
 # Delta: only index JSONL files produced since a given date
-poetry run infomedicament-dataeng index-opensearch --doc-type notice --s3 --since 2026-03-01
+poetry run infomedicament-dataeng index-opensearch sections --doc-type notice --s3 --since 2026-03-01
 ```
 
 Re-indexing is idempotent — each document has a deterministic ID (`{cis}_{anchor}_{doc_type}`), so re-running overwrites existing documents without creating duplicates.
@@ -356,12 +356,12 @@ scalingo --app your-app run "python -m infomedicament_dataeng.cli db-import --pa
 scalingo --app your-app run "python -m infomedicament_dataeng.cli db-import --pattern R"
 
 # Index notices and RCPs into OpenSearch (delta)
-scalingo --app your-app run "python -m infomedicament_dataeng.cli index-opensearch --doc-type notice --s3 --since $(date +%Y-%m-%d)"
-scalingo --app your-app run "python -m infomedicament_dataeng.cli index-opensearch --doc-type rcp --s3 --since $(date +%Y-%m-%d)"
+scalingo --app your-app run "python -m infomedicament_dataeng.cli index-opensearch sections --doc-type notice --s3 --since $(date +%Y-%m-%d)"
+scalingo --app your-app run "python -m infomedicament_dataeng.cli index-opensearch sections --doc-type rcp --s3 --since $(date +%Y-%m-%d)"
 
 # Full reindex
-scalingo --app your-app run "python -m infomedicament_dataeng.cli index-opensearch --doc-type notice --s3"
-scalingo --app your-app run "python -m infomedicament_dataeng.cli index-opensearch --doc-type rcp --s3"
+scalingo --app your-app run "python -m infomedicament_dataeng.cli index-opensearch sections --doc-type notice --s3"
+scalingo --app your-app run "python -m infomedicament_dataeng.cli index-opensearch sections --doc-type rcp --s3"
 ```
 
 For automated execution, we will use [Scalingo Scheduler](https://doc.scalingo.com/platform/app/task-scheduling/scalingo-scheduler) with a `cron.json` file.

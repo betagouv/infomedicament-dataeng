@@ -1,17 +1,20 @@
-"""OpenSearch ETL: index parsed medication sections into OpenSearch."""
+"""ETL: index parsed Notice/RCP sections into OpenSearch (one document per section)."""
 
 import json
 import logging
 from collections.abc import Iterable, Iterator
-from urllib.parse import urlparse
+from datetime import date
 
 import pymysql
 import pymysql.cursors
 from opensearchpy import OpenSearch, helpers
 
-from .config import DatabaseConfig, OpenSearchConfig, get_config
+from ..config import DatabaseConfig, OpenSearchConfig, get_config
+from .client import create_or_update_index, get_opensearch_client
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_INDEX = "specialite_sections"
 
 INDEX_MAPPING = {
     "settings": {
@@ -59,10 +62,10 @@ _BANNED_ANCHORS = {
 
 
 def load_cis_names(config: DatabaseConfig | None = None) -> dict[str, str]:
-    """Load CIS code → medication name mapping from MySQL.
+    """Load CIS code → specialité name mapping from MySQL.
 
     Returns:
-        Dict mapping CIS code strings to SpecDenom01 (medication name).
+        Dict mapping CIS code strings to SpecDenom01 (specialité name).
     """
     if config is None:
         config = get_config().database
@@ -104,8 +107,8 @@ def _extract_text(block: dict) -> str:
 def _iter_section_docs(record: dict, doc_type: str, cis_names: dict[str, str]) -> Iterator[dict]:
     """Yield one OpenSearch document per section from a parsed JSONL record.
 
-    Skips AmmAnnexeTitre blocks (just "NOTICE"/"RCP") and uses DateNotif
-    as metadata propagated to all section documents.
+    Skips AmmAnnexeTitre and banned anchors. Uses DateNotif as metadata
+    propagated to all section documents.
     """
     source = record.get("source", {})
     cis = str(source.get("cis", ""))
@@ -146,35 +149,6 @@ def _iter_section_docs(record: dict, doc_type: str, cis_names: dict[str, str]) -
         }
 
 
-def get_opensearch_client(config: OpenSearchConfig | None = None) -> OpenSearch:
-    """Build an OpenSearch client from config.
-
-    Parses credentials from the URL if present (Scalingo format:
-    http://user:password@host:port).
-    """
-    if config is None:
-        config = get_config().opensearch
-
-    parsed = urlparse(config.url)
-    http_auth = None
-    if parsed.username and parsed.password:
-        http_auth = (parsed.username, parsed.password)
-
-    # Reconstruct URL without credentials for the hosts parameter
-    netloc_no_auth = parsed.hostname
-    if parsed.port:
-        netloc_no_auth = f"{netloc_no_auth}:{parsed.port}"
-    clean_url = parsed._replace(netloc=netloc_no_auth).geturl()
-
-    return OpenSearch(hosts=[clean_url], http_auth=http_auth, use_ssl=parsed.scheme == "https")
-
-
-def create_or_update_index(client: OpenSearch, index_name: str) -> None:
-    """Create the index with French analyzer mapping. No-op if it already exists."""
-    client.indices.create(index=index_name, body=INDEX_MAPPING)
-    logger.info(f"Index '{index_name}' ready")
-
-
 def index_records(
     records: Iterable[dict],
     index_name: str,
@@ -183,6 +157,9 @@ def index_records(
     client: OpenSearch,
 ) -> int:
     """Index an iterable of parsed JSONL records into OpenSearch.
+
+    Documents use a deterministic ID ({cis}_{anchor}_{doc_type}), so
+    re-indexing is idempotent.
 
     Returns the number of documents successfully indexed.
     """
@@ -209,7 +186,7 @@ def index_from_local(
 ) -> int:
     """Index a local JSONL file into OpenSearch."""
     client = get_opensearch_client(config)
-    create_or_update_index(client, index_name)
+    create_or_update_index(client, index_name, INDEX_MAPPING)
     cis_names = load_cis_names(db_config)
     logger.info(f"Loaded {len(cis_names)} CIS names from MySQL")
 
@@ -237,7 +214,7 @@ def index_from_s3(
     pattern: str,
     index_name: str,
     doc_type: str,
-    since=None,
+    since: date | None = None,
     limite: int | None = None,
     config: OpenSearchConfig | None = None,
     db_config: DatabaseConfig | None = None,
@@ -246,10 +223,9 @@ def index_from_s3(
 
     Args:
         pattern: "N" for Notices, "R" for RCP.
-        since: If provided, only import JSONL files dated on or after this date.
+        since: If provided, only index JSONL files dated on or after this date.
     """
-    from .config import get_config
-    from .s3 import S3Client
+    from ..s3 import S3Client
 
     app_config = get_config()
     if not app_config.s3.is_configured():
@@ -257,7 +233,7 @@ def index_from_s3(
 
     s3_client = S3Client(app_config.s3)
     client = get_opensearch_client(config)
-    create_or_update_index(client, index_name)
+    create_or_update_index(client, index_name, INDEX_MAPPING)
     cis_names = load_cis_names(db_config)
     logger.info(f"Loaded {len(cis_names)} CIS names from MySQL")
 

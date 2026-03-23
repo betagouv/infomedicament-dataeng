@@ -1,4 +1,4 @@
-from infomedicament_dataeng.opensearch_etl import _extract_text, _iter_section_docs
+from infomedicament_dataeng.opensearch.sections import _extract_text, _iter_section_docs
 
 
 class TestExtractText:
