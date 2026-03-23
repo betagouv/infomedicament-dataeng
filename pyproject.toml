@@ -6,7 +6,7 @@ readme = "README.md"
 packages = [{include = "infomedicament_dataeng", from = "src"}]
 
 [tool.poetry.dependencies]
-python = ">=3.13"
+python = ">=3.13,<4"
 beautifulsoup4 = ">=4.12"
 lxml = ">=5.0"
 chardet = ">=5.0"
@@ -17,6 +17,7 @@ boto3 = ">=1.35"
 sqlglot = "^28.9.0"
 psycopg2-binary = "^2.9.11"
 pyyaml = "^6.0.3"
+opensearch-py = "^3.1.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = ">=8.0"
