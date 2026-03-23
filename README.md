@@ -6,6 +6,7 @@ Data engineering tools for ANSM's [infomedicament](https://infomedicament.beta.g
 
 - [HTML Parsing](#html-parsing) — parse ANSM Notice/RCP HTML files from local disk or S3
 - [DB Import](#db-import) — import parsed JSONL files into PostgreSQL
+- [OpenSearch Indexing](#opensearch-indexing) — index parsed sections into OpenSearch for full-text search
 - [SQL to CSV](#sql-to-csv-conversion) — convert T-SQL/MySQL dump files to CSV
 - [Pediatric Classification](#pediatric-classification) — classify RCPs for pediatric use
 - [Import from data.gouv.fr](#import-from-datagouvfr) — fetch open datasets and load them into PostgreSQL
@@ -103,6 +104,40 @@ poetry run infomedicament-dataeng db-import --pattern N --limite 10
 ```
 
 The command lists `parsed_<pattern>_*.jsonl` files under `S3_OUTPUT_PREFIX`, downloads each one, and upserts the records into PostgreSQL (by `codeCIS`). Existing content trees are deleted before re-inserting.
+
+### OpenSearch Indexing
+
+Index parsed Notice/RCP sections into OpenSearch to power full-text search. Each section of a notice or RCP becomes one document (~40 sections × ~15k medications ≈ 600k documents), enabling precise section-level search results with a French analyzer (elision, stopwords, stemming).
+
+```bash
+poetry run infomedicament-dataeng index-opensearch --doc-type <notice|rcp> [options]
+```
+
+Options:
+- `--doc-type`: `notice` or `rcp` (required)
+- `--index`: OpenSearch index name (default: `medicaments`)
+- `--input`: Local JSONL file to index (mutually exclusive with `--s3`)
+- `--s3`: Read from S3 parsed files instead of a local file (mutually exclusive with `--input`)
+- `--since YYYY-MM-DD`: S3 mode only — only index JSONL files dated on or after this date
+- `--limite`: Cap on number of records indexed (for testing)
+
+Examples:
+```bash
+# Index a local JSONL file (development)
+poetry run infomedicament-dataeng index-opensearch --doc-type notice --input output.jsonl
+
+# Index with a record limit for testing
+poetry run infomedicament-dataeng index-opensearch --doc-type notice --input output.jsonl --limite 100
+
+# Index from S3 (production)
+poetry run infomedicament-dataeng index-opensearch --doc-type notice --s3
+poetry run infomedicament-dataeng index-opensearch --doc-type rcp --s3
+
+# Delta: only index JSONL files produced since a given date
+poetry run infomedicament-dataeng index-opensearch --doc-type notice --s3 --since 2026-03-01
+```
+
+Re-indexing is idempotent — each document has a deterministic ID (`{cis}_{anchor}_{doc_type}`), so re-running overwrites existing documents without creating duplicates.
 
 ### SQL to CSV Conversion
 
@@ -272,6 +307,11 @@ Two configuration formats are supported:
 - `POSTGRES_DATABASE` (default: postgres)
 - `POSTGRES_PORT` (default: 5432)
 
+### OpenSearch
+
+- `SCALINGO_OPENSEARCH_URL` or `OPENSEARCH_URL`: Full connection URL including credentials (e.g. `http://user:pass@host:port`). Scalingo provides this automatically when an OpenSearch addon is attached.
+- `OPENSEARCH_HOST`: Fallback for local development (default: `http://localhost:9200`)
+
 ### Application
 
 - `LOG_LEVEL`: Logging level (default: INFO)
@@ -314,6 +354,14 @@ scalingo --app your-app run "python -m infomedicament_dataeng.cli db-import --pa
 # Full import: all JSONL files
 scalingo --app your-app run "python -m infomedicament_dataeng.cli db-import --pattern N"
 scalingo --app your-app run "python -m infomedicament_dataeng.cli db-import --pattern R"
+
+# Index notices and RCPs into OpenSearch (delta)
+scalingo --app your-app run "python -m infomedicament_dataeng.cli index-opensearch --doc-type notice --s3 --since $(date +%Y-%m-%d)"
+scalingo --app your-app run "python -m infomedicament_dataeng.cli index-opensearch --doc-type rcp --s3 --since $(date +%Y-%m-%d)"
+
+# Full reindex
+scalingo --app your-app run "python -m infomedicament_dataeng.cli index-opensearch --doc-type notice --s3"
+scalingo --app your-app run "python -m infomedicament_dataeng.cli index-opensearch --doc-type rcp --s3"
 ```
 
 For automated execution, we will use [Scalingo Scheduler](https://doc.scalingo.com/platform/app/task-scheduling/scalingo-scheduler) with a `cron.json` file.

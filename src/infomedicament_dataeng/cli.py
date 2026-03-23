@@ -17,6 +17,7 @@ from .config import get_config
 from .datagouv import import_dataset, load_datasets
 from .db import get_authorized_cis, get_filename_to_cis_mapping, import_to_postgres
 from .io import charger_liste_cis
+from .opensearch_etl import index_from_local, index_from_s3
 from .parser import html_vers_json
 from .s3 import S3Client
 from .sql_to_csv import sql_to_csv
@@ -544,6 +545,25 @@ def run_import_datagouv(config_path: Path, dataset_name: str | None = None) -> N
         logger.info(f"Done: {count} rows imported into '{dataset.postgresql_table}'")
 
 
+def run_index_opensearch(
+    doc_type: str,
+    index_name: str,
+    input_path: str | None = None,
+    use_s3: bool = False,
+    since: date | None = None,
+    limite: int | None = None,
+) -> None:
+    """Index parsed JSONL data into OpenSearch (local file or S3)."""
+    if use_s3:
+        pattern = "N" if doc_type == "notice" else "R"
+        total = index_from_s3(pattern=pattern, index_name=index_name, doc_type=doc_type, since=since, limite=limite)
+    else:
+        if not input_path:
+            raise ValueError("--input is required when not using --s3")
+        total = index_from_local(path=input_path, index_name=index_name, doc_type=doc_type, limite=limite)
+    logger.info(f"Done: {total} section documents indexed into '{index_name}'")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Parse ANSM medication HTML documents (Notices and RCPs)",
@@ -628,6 +648,21 @@ Environment variables for database:
     ped_parser.add_argument("--output", "-o", default="data/predictions.csv", help="Output predictions CSV")
     ped_parser.add_argument("--debug", action="store_true", help="Write debug_sections.jsonl with raw section texts")
 
+    # Index into OpenSearch
+    os_parser = subparsers.add_parser("index-opensearch", help="Index parsed JSONL data into OpenSearch")
+    os_parser.add_argument("--doc-type", required=True, choices=["notice", "rcp"], help="Type of documents to index")
+    os_parser.add_argument("--index", default="medicaments", help="OpenSearch index name (default: medicaments)")
+    os_source = os_parser.add_mutually_exclusive_group(required=True)
+    os_source.add_argument("--input", help="Local JSONL file to index")
+    os_source.add_argument("--s3", action="store_true", help="Read from S3 parsed files")
+    os_parser.add_argument(
+        "--since",
+        type=lambda s: datetime.strptime(s, "%Y-%m-%d").date(),
+        metavar="YYYY-MM-DD",
+        help="S3 mode only: only index JSONL files dated on or after this date",
+    )
+    os_parser.add_argument("--limite", type=int, help="Cap on number of records indexed (for testing)")
+
     # Global options
     parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose logging")
 
@@ -694,6 +729,20 @@ Environment variables for database:
     elif args.command == "classify-pediatric":
         try:
             run_pediatric_classification(args.rcp, args.truth, args.output, debug=args.debug)
+        except Exception as e:
+            logger.exception(f"Error: {e}")
+            raise SystemExit(1)
+
+    elif args.command == "index-opensearch":
+        try:
+            run_index_opensearch(
+                doc_type=args.doc_type,
+                index_name=args.index,
+                input_path=args.input,
+                use_s3=args.s3,
+                since=args.since,
+                limite=args.limite,
+            )
         except Exception as e:
             logger.exception(f"Error: {e}")
             raise SystemExit(1)
