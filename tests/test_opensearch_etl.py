@@ -141,3 +141,245 @@ class TestIterSectionDocs:
         docs = list(_iter_section_docs(record, "notice", {}))
         assert len(docs) == 1
         assert docs[0]["section_anchor"] == "pos"
+
+    def test_rcp_yields_subsections_instead_of_parent(self):
+        record = self._make_record(
+            "123",
+            [
+                {
+                    "type": "AmmAnnexeTitre1",
+                    "content": "4. DONNEES CLINIQUES",
+                    "anchor": "RcpDonneesCliniques",
+                    "children": [
+                        {
+                            "type": "AmmAnnexeTitre2",
+                            "content": "4.2. Posologie",
+                            "anchor": "RcpPosoAdmin",
+                            "children": [{"content": "Adulte : 1g"}],
+                        },
+                        {
+                            "type": "AmmAnnexeTitre2",
+                            "content": "4.3. Contre-indications",
+                            "anchor": "RcpContreindications",
+                            "children": [{"content": "Allergie connue"}],
+                        },
+                    ],
+                }
+            ],
+        )
+        docs = list(_iter_section_docs(record, "rcp", {"123": "DOLIPRANE"}))
+        assert len(docs) == 2
+        anchors = {d["section_anchor"] for d in docs}
+        assert anchors == {"RcpPosoAdmin", "RcpContreindications"}
+
+    def test_rcp_subsection_title_from_child(self):
+        record = self._make_record(
+            "123",
+            [
+                {
+                    "type": "AmmAnnexeTitre1",
+                    "content": "4. DONNEES CLINIQUES",
+                    "anchor": "RcpDonneesCliniques",
+                    "children": [
+                        {
+                            "type": "AmmAnnexeTitre2",
+                            "content": "4.2. Posologie",
+                            "anchor": "RcpPosoAdmin",
+                            "children": [{"content": "Adulte : 1g"}],
+                        },
+                    ],
+                }
+            ],
+        )
+        docs = list(_iter_section_docs(record, "rcp", {}))
+        assert docs[0]["section_title"] == "4.2. Posologie"
+
+    def test_rcp_subsection_text_is_child_only(self):
+        record = self._make_record(
+            "123",
+            [
+                {
+                    "type": "AmmAnnexeTitre1",
+                    "content": "4. DONNEES CLINIQUES",
+                    "anchor": "RcpDonneesCliniques",
+                    "children": [
+                        {
+                            "type": "AmmAnnexeTitre2",
+                            "content": "4.2. Posologie",
+                            "anchor": "RcpPosoAdmin",
+                            "children": [{"content": "posologie text"}],
+                        },
+                        {
+                            "type": "AmmAnnexeTitre2",
+                            "content": "4.3. Contre-indications",
+                            "anchor": "RcpContreindications",
+                            "children": [{"content": "contreindication text"}],
+                        },
+                    ],
+                }
+            ],
+        )
+        docs = list(_iter_section_docs(record, "rcp", {}))
+        poso_doc = next(d for d in docs if d["section_anchor"] == "RcpPosoAdmin")
+        assert "posologie text" in poso_doc["text_content"]
+        assert "contreindication text" not in poso_doc["text_content"]
+
+    def test_parent_without_subsection_children_yields_normally(self):
+        record = self._make_record(
+            "123",
+            [
+                {
+                    "type": "AmmAnnexeTitre1",
+                    "content": "Dénomination",
+                    "anchor": "RcpDenomination",
+                    "children": [{"type": "AmmCorpsTexte", "content": "DOLIPRANE 1g"}],
+                }
+            ],
+        )
+        docs = list(_iter_section_docs(record, "rcp", {}))
+        assert len(docs) == 1
+        assert docs[0]["section_anchor"] == "RcpDenomination"
+        assert "DOLIPRANE 1g" in docs[0]["text_content"]
+
+    def test_anchor_alias_normalized(self):
+        record = self._make_record(
+            "123",
+            [
+                {
+                    "type": "AmmAnnexeTitre1",
+                    "content": "Contre-indications",
+                    "anchor": "RcpContreIndic",
+                    "children": [{"content": "Allergie"}],
+                }
+            ],
+        )
+        docs = list(_iter_section_docs(record, "rcp", {}))
+        assert docs[0]["section_anchor"] == "RcpContreindications"
+
+    def test_toc_anchor_normalized_via_section_number(self):
+        record = self._make_record(
+            "123",
+            [
+                {
+                    "type": "AmmAnnexeTitre1",
+                    "content": "4.1. Indications thérapeutiques",
+                    "anchor": "_Toc999",
+                    "children": [{"content": "texte"}],
+                }
+            ],
+        )
+        docs = list(_iter_section_docs(record, "rcp", {}))
+        assert docs[0]["section_anchor"] == "RcpIndicTherap"
+
+    def test_toc_anchor_normalized_with_encoding_artifacts(self):
+        record = self._make_record(
+            "123",
+            [
+                {
+                    "type": "AmmAnnexeTitre1",
+                    "content": "4.1.ÂÂÂÂÂ Indications thérapeutiques",
+                    "anchor": "_Toc999",
+                    "children": [{"content": "texte"}],
+                }
+            ],
+        )
+        docs = list(_iter_section_docs(record, "rcp", {}))
+        assert docs[0]["section_anchor"] == "RcpIndicTherap"
+
+    def test_toc_anchor_body_text_title_unchanged(self):
+        record = self._make_record(
+            "123",
+            [
+                {
+                    "type": "AmmAnnexeTitre1",
+                    "content": "DANS LA PRESENTE ANNEXE LES TERMES...",
+                    "anchor": "_Toc999",
+                    "children": [{"content": "texte"}],
+                }
+            ],
+        )
+        docs = list(_iter_section_docs(record, "rcp", {}))
+        assert docs[0]["section_anchor"] == "_Toc999"
+
+    def test_toc_anchor_not_normalized_for_notice(self):
+        record = self._make_record(
+            "123",
+            [
+                {
+                    "type": "AmmNoticeTitre1",
+                    "content": "4.1. Indications thérapeutiques",
+                    "anchor": "_Toc999",
+                    "children": [{"content": "texte"}],
+                }
+            ],
+        )
+        # Notices don't use numbered sections — no RCP number mapping should apply
+        docs = list(_iter_section_docs(record, "notice", {}))
+        assert docs[0]["section_anchor"] != "RcpIndicTherap"
+
+    def test_toc_anchor_normalized_for_notice_by_title(self):
+        record = self._make_record(
+            "123",
+            [
+                {
+                    "type": "AmmNoticeTitre1",
+                    "content": "Posologie",
+                    "anchor": "_Toc999",
+                    "children": [{"content": "texte"}],
+                }
+            ],
+        )
+        docs = list(_iter_section_docs(record, "notice", {}))
+        assert docs[0]["section_anchor"] == "Ann3bPosologie"
+
+    def test_hlk_anchor_normalized_same_as_toc(self):
+        record = self._make_record(
+            "123",
+            [
+                {
+                    "type": "AmmAnnexeTitre1",
+                    "content": "4.8. Effets indésirables",
+                    "anchor": "_Hlk160213897",
+                    "children": [{"content": "texte"}],
+                }
+            ],
+        )
+        docs = list(_iter_section_docs(record, "rcp", {}))
+        assert docs[0]["section_anchor"] == "RcpEffetsIndesirables"
+
+    def test_toc_anchor_normalized_for_notice_by_number(self):
+        record = self._make_record(
+            "123",
+            [
+                {
+                    "type": "AmmAnnexeTitre1",
+                    "content": "2. QUELLES SONT LES INFORMATIONS A CONNAITRE AVANT DE PRENDRE CE MEDICAMENT ?",
+                    "anchor": "_Toc142279004",
+                    "children": [{"content": "texte"}],
+                }
+            ],
+        )
+        docs = list(_iter_section_docs(record, "notice", {}))
+        assert docs[0]["section_anchor"] == "Ann3bInfoNecessaires"
+
+    def test_subsection_anchor_alias_normalized(self):
+        record = self._make_record(
+            "123",
+            [
+                {
+                    "type": "AmmAnnexeTitre1",
+                    "content": "4. DONNEES CLINIQUES",
+                    "anchor": "RcpDonneesCliniques",
+                    "children": [
+                        {
+                            "type": "AmmAnnexeTitre2",
+                            "content": "Grossesse",
+                            "anchor": "RcpGrossAllait",
+                            "children": [{"content": "Déconseillé"}],
+                        },
+                    ],
+                }
+            ],
+        )
+        docs = list(_iter_section_docs(record, "rcp", {}))
+        assert docs[0]["section_anchor"] == "RcpFertGrossAllait"
