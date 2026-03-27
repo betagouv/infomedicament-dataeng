@@ -221,20 +221,31 @@ Options:
 - `--rcp`: Parsed RCP JSONL file (required, produced by the `s3` or `local` commands with `--pattern R`)
 - `--truth`: Ground truth CSV for evaluation (columns: `cis,code_atc,A:...,B:...,C:...` with `oui/non` values)
 - `--output, -o`: Output predictions CSV (default: `data/predictions.csv`)
+- `--age`: Filter classification for a specific age in years (`0` = neonate). If omitted, any pediatric mention counts regardless of age.
 
 Example:
 ```bash
 # Produce parsed RCPs first
 poetry run infomedicament-dataeng s3 --cis-file data/test_set_cis.csv --pattern R -o data/rcp_pediatrie.jsonl
 
-# Classify and evaluate against ground truth
+# Classify for all pediatric ages (no age filter)
 poetry run infomedicament-dataeng classify-pediatric \
   --rcp data/rcp_pediatrie.jsonl \
   --truth data/ground_truth.csv \
   -o data/predictions.csv
+
+# Classify for a 6-year-old specifically
+poetry run infomedicament-dataeng classify-pediatric \
+  --rcp data/rcp_pediatrie.jsonl \
+  --age 6 \
+  -o data/predictions_age6.csv
 ```
 
 The predictions CSV includes explainability columns (matched keywords, evidence text, C-reasons) for manual review.
+
+#### How age filtering works
+
+Each keyword has an implicit age range (e.g. `nourrisson` → 0–2 years, `adolescent` → 12–17 years). Explicit age expressions in the text (e.g. *"moins de 6 ans"*, *"de 6 à 11 ans"*) take precedence over the keyword range. A text block is only counted as a match when the queried age falls within the applicable range.
 
 ### Import from data.gouv.fr
 

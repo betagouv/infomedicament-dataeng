@@ -13,6 +13,7 @@ It does not use any machine learning or external data sources.
 import csv
 import re
 from dataclasses import dataclass, field
+from types import FunctionType
 
 from infomedicament_dataeng import pediatric_config
 
@@ -43,6 +44,12 @@ def extract_section_texts(rcp_json: dict, section_prefix: str) -> list[str]:
     return texts
 
 
+def _is_heading_label(text: str) -> bool:
+    """Return True if text is a standalone structural heading with no clinical signal."""
+    normalized = text.strip().lstrip("·•-– ").rstrip(": ")
+    return any(re.fullmatch(p, normalized, re.IGNORECASE) for p in pediatric_config._HEADING_ONLY_TITLE_PATTERNS)
+
+
 def _collect_texts(node: dict, texts: list[str]) -> None:
     """Recursively collect text content from a JSON node."""
     content = node.get("content", "")
@@ -51,18 +58,12 @@ def _collect_texts(node: dict, texts: list[str]) -> None:
     # Skip the section heading itself (AmmAnnexeTitre2)
     if node_type == "AmmAnnexeTitre2":
         pass
-    elif node_type in ("AmmAnnexeTitre3", "AmmAnnexeTitre4"):
-        # Include subsection titles only if they carry clinical info
-        # (e.g. "Réservé au nourrisson et à l'enfant de plus de 3 mois")
-        # Skip generic structural headings
-        if isinstance(content, str) and content.strip().lower() not in pediatric_config._HEADING_ONLY_TITLES:
-            texts.append(content.strip())
-    elif isinstance(content, str) and content.strip():
+    elif isinstance(content, str) and content.strip() and not _is_heading_label(content.strip()):
         texts.append(content.strip())
     elif isinstance(content, list):
         # Bullet list items
         for item in content:
-            if isinstance(item, str) and item.strip():
+            if isinstance(item, str) and item.strip() and not _is_heading_label(item.strip()):
                 texts.append(item.strip())
 
     for child in node.get("children", []):
@@ -139,7 +140,59 @@ class PediatricClassification:
     matches_43: list[SentenceMatch] = field(default_factory=list)
 
 
-def classify(rcp_json: dict, atc_code: str = "") -> PediatricClassification:
+# --- Age-based filtering ---
+
+# Each tuple: (compiled regex, handler) where handler(m) -> (min_year, max_year)
+# Patterns are tried in order; first match wins.
+_AGE_RANGE_PATTERNS: list[tuple[re.Pattern, FunctionType]] = [
+    # "moins de N mois" / "< N mois" → all sub-year: (0, 0)
+    (re.compile(r"(?:moins\s*de|<\s*)\s*\d+\s*mois", re.IGNORECASE), lambda m: (0, 0)),
+    # "<= N ans"
+    (re.compile(r"<=\s*(\d+)\s*ans?", re.IGNORECASE), lambda m: (0, min(int(m.group(1)), 17))),
+    # "< N ans" / "moins de N ans" / "âgé de moins de N ans"
+    (re.compile(r"(?:moins\s*de|<)\s*(\d+)\s*ans?", re.IGNORECASE), lambda m: (0, min(int(m.group(1)) - 1, 17))),
+    # ">= N ans"
+    (re.compile(r">=\s*(\d+)\s*ans?", re.IGNORECASE), lambda m: (int(m.group(1)), 17)),
+    # "à partir de N ans" / "plus de N ans" / "N ans et plus"
+    (re.compile(r"(?:à\s*partir\s*de|plus\s*de)\s*(\d+)\s*ans?", re.IGNORECASE), lambda m: (int(m.group(1)), 17)),
+    (re.compile(r"(\d+)\s*ans?\s*et\s*plus", re.IGNORECASE), lambda m: (int(m.group(1)), 17)),
+    # "de N à M ans" / "N à M ans" / "N-M ans" (digits on both sides, followed by "ans")
+    (re.compile(r"(\d+)\s*[-à]\s*(\d+)\s*ans?", re.IGNORECASE), lambda m: (int(m.group(1)), int(m.group(2)))),
+]
+
+
+def parse_explicit_age_range(text: str) -> tuple[int, int] | None:
+    """Extract an explicit age range from a text block.
+
+    Returns (min_year, max_year) in integer years, or None if no range is found.
+    Age 0 means neonate/newborn; all sub-year ages map to year 0.
+    """
+    for pattern, handler in _AGE_RANGE_PATTERNS:
+        m = pattern.search(text)
+        if m:
+            return handler(m)
+    return None
+
+
+def text_block_covers_age(text: str, age: int) -> bool:
+    """Return True if the text block is relevant for the given age (in years).
+
+    Tries explicit age ranges first; falls back to keyword implicit ranges.
+    """
+    explicit = parse_explicit_age_range(text)
+    if explicit is not None:
+        return explicit[0] <= age <= explicit[1]
+
+    text_lower = text.lower()
+    for kw in pediatric_config.PEDIATRIC_KEYWORDS:
+        if kw in text_lower:
+            lo, hi = pediatric_config.KEYWORD_AGE_RANGES[kw]
+            if lo <= age <= hi:
+                return True
+    return False
+
+
+def classify(rcp_json: dict, atc_code: str = "", age: int | None = None) -> PediatricClassification:
     """Classify a drug for pediatric use based on its parsed RCP.
 
     Args:
@@ -164,6 +217,8 @@ def classify(rcp_json: dict, atc_code: str = "") -> PediatricClassification:
     has_keyword_no_indication = False
 
     for text in texts_41_42:
+        if age is not None and not text_block_covers_age(text, age):
+            continue
         keywords = find_pediatric_keywords_in_text(text)
         if not keywords:
             continue
@@ -214,6 +269,8 @@ def classify(rcp_json: dict, atc_code: str = "") -> PediatricClassification:
     # --- Section 4.3: Contre-indications ---
     texts_43 = extract_section_texts(rcp_json, "4.3")
     for text in texts_43:
+        if age is not None and not text_block_covers_age(text, age):
+            continue
         keywords = find_pediatric_keywords_in_text(text)
         if keywords:
             result.matches_43.append(SentenceMatch(text=text, keywords=keywords))
