@@ -2,6 +2,8 @@
 
 import json
 import logging
+import re
+import unicodedata
 from collections.abc import Iterable, Iterator
 from datetime import date
 
@@ -59,6 +61,117 @@ _DATE_NOTIF_TYPE = "DateNotif"
 _BANNED_ANCHORS = {
     "Ann3bSomm",  # "Que contient cette notice ?" — table of contents, no search value
 }
+_RCP_SUBSECTION_TYPE = "AmmAnnexeTitre2"
+# Aliases present in a minority of documents mapped to canonical anchor names
+_ANCHOR_ALIASES: dict[str, str] = {
+    "RcpContreIndic": "RcpContreindications",
+    "RcpInteractions": "RcpInteractionsMed",
+    "RcpGrossAllait": "RcpFertGrossAllait",
+    "RcpPropPharmacodynamie": "RcpPropPharmacodynamiques",
+    "RcpPropPharmacocinetique": "RcpPropPharmacocinetiques",
+    "RcpCompoQualitQuanti": "RcpCompoQualiQuanti",
+    "RcpPropPharmacologie": "RcpPropPharmacologiques",
+    "RcpPresentation": "RcpNumAutor",
+}
+
+
+_WORD_ANCHOR_RE = re.compile(r"^_")
+_SECTION_NUMBER_RE = re.compile(r"^(\d+(?:\.\d+)?)\.")
+
+_RCP_NUMBER_TO_ANCHOR: dict[str, str] = {
+    "1": "RcpDenomination",
+    "2": "RcpCompoQualiQuanti",
+    "3": "RcpFormePharm",
+    "4": "RcpDonneesCliniques",
+    "4.1": "RcpIndicTherap",
+    "4.2": "RcpPosoAdmin",
+    "4.3": "RcpContreindications",
+    "4.4": "RcpMisesEnGarde",
+    "4.5": "RcpInteractionsMed",
+    "4.6": "RcpFertGrossAllait",
+    "4.7": "RcpConduite",
+    "4.8": "RcpEffetsIndesirables",
+    "4.9": "RcpSurdosage",
+    "5": "RcpPropPharmacologiques",
+    "5.1": "RcpPropPharmacodynamiques",
+    "5.2": "RcpPropPharmacocinetiques",
+    "5.3": "RcpSecuritePreclinique",
+    "6": "RcpDonneesPharmaceutiques",
+    "6.1": "RcpListeExcipients",
+    "6.2": "RcpIncompatibilites",
+    "6.3": "RcpDureeConservation",
+    "6.4": "RcpPrecConservation",
+    "6.5": "RcpEmballage",
+    "6.6": "RcpPrecEmpl",
+    "7": "RcpTitulaireAmm",
+    "8": "RcpNumAutor",
+    "9": "RcpPremiereAutorisation",
+    "10": "RcpDateRevision",
+    "11": "RcpDosimetrie",
+    "12": "RcpInstPrepRadioph",
+}
+
+# Notice top-level sections are numbered 1–6; prefix extraction maps them to canonical anchors
+_NOTICE_NUMBER_TO_ANCHOR: dict[str, str] = {
+    "1": "Ann3bQuestceque",
+    "2": "Ann3bInfoNecessaires",
+    "3": "Ann3bCommentPrendre",
+    "4": "Ann3bEffetsIndesirables",
+    "5": "Ann3bConservation",
+    "6": "Ann3bEmballage",
+}
+
+# Normalized (lowercase, ascii-folded, whitespace-collapsed) notice section title → anchor
+# Used for short section headings that don't carry a numeric prefix
+_NOTICE_TITLE_TO_ANCHOR: dict[str, str] = {
+    "encadre": "Ann3bEncadre",
+    "denomination du medicament": "Ann3bDenomination",
+    "classe pharmacotherapeutique": "Ann3bClassPharma",
+    "indications therapeutiques": "Ann3bIndicTherap",
+    "liste des informations necessaires avant la prise du medicament": "Ann3bInfoAvantPrise",
+    "contre-indications": "Ann3bContreIndic",
+    "precautions d'emploi ; mises en garde speciales": "Ann3bMisesEnGarde",
+    "interactions avec d'autres medicaments": "Ann3bInteractions",
+    "interactions avec les aliments et les boissons": "Ann3bInteractionsAliments",
+    "interactions avec les produits de phytotherapie ou therapies alternatives": "Ann3bIntPhyto",
+    "utilisation pendant la grossesse et l'allaitement": "Ann3bGrossAllait",
+    "grossesse et allaitement": "Ann3bGrossAllait",
+    "sportifs": "Ann3bSportifs",
+    "effets sur l'aptitude a conduire des vehicules ou a utiliser des machines": "Ann3bConduite",
+    "liste des excipients a effet notoire": "Ann3bListeExcipientsNotoires",
+    "posologie": "Ann3bPosologie",
+    "effets indesirables": "Ann3bEffetsIndesirablesDesc",
+    "surdosage": "Ann3bInstrucSurdosage",
+    "conservation": "Ann3bConservation",
+}
+
+
+def _normalize_title(title: str) -> str:
+    """Lowercase, strip, collapse whitespace, remove accents for anchor lookup."""
+    nfkd = unicodedata.normalize("NFKD", title)
+    ascii_only = nfkd.encode("ascii", "ignore").decode("ascii")
+    return " ".join(ascii_only.lower().split())
+
+
+def _normalize_anchor(anchor: str, title: str = "", doc_type: str = "") -> str:
+    anchor = _ANCHOR_ALIASES.get(anchor, anchor)
+    if _WORD_ANCHOR_RE.match(anchor) and title:
+        if doc_type == "rcp":
+            m = _SECTION_NUMBER_RE.match(title.strip())
+            if m:
+                canonical = _RCP_NUMBER_TO_ANCHOR.get(m.group(1))
+                if canonical:
+                    return canonical
+        elif doc_type == "notice":
+            m = _SECTION_NUMBER_RE.match(title.strip())
+            if m:
+                canonical = _NOTICE_NUMBER_TO_ANCHOR.get(m.group(1))
+                if canonical:
+                    return canonical
+            canonical = _NOTICE_TITLE_TO_ANCHOR.get(_normalize_title(title))
+            if canonical:
+                return canonical
+    return anchor
 
 
 def load_cis_names(config: DatabaseConfig | None = None) -> dict[str, str]:
@@ -129,6 +242,35 @@ def _iter_section_docs(record: dict, doc_type: str, cis_names: dict[str, str]) -
         if block.get("anchor") in _BANNED_ANCHORS:
             continue
 
+        # For RCP blocks: if there are AmmAnnexeTitre2 children with anchors,
+        # yield one doc per subsection instead of the parent.
+        if doc_type == "rcp":
+            subsection_children = [
+                c for c in (block.get("children") or []) if c.get("type") == _RCP_SUBSECTION_TYPE and c.get("anchor")
+            ]
+            if subsection_children:
+                for child in subsection_children:
+                    child_title = child.get("content", "")
+                    if isinstance(child_title, list):
+                        child_title = " ".join(child_title)
+                    anchor = _normalize_anchor(child.get("anchor") or "", title=child_title, doc_type=doc_type)
+                    if anchor in _BANNED_ANCHORS:
+                        continue
+                    text = _extract_text(child)
+                    if not text:
+                        continue
+                    yield {
+                        "cis_code": cis,
+                        "spec_name": spec_name,
+                        "doc_type": doc_type,
+                        "section_type": child.get("type", ""),
+                        "section_anchor": anchor,
+                        "section_title": child_title.strip(),
+                        "text_content": text,
+                        "date_notif": date_notif,
+                    }
+                continue
+
         text = _extract_text(block)
         if not text:
             continue
@@ -136,13 +278,14 @@ def _iter_section_docs(record: dict, doc_type: str, cis_names: dict[str, str]) -
         section_title = block.get("content", "")
         if isinstance(section_title, list):
             section_title = " ".join(section_title)
+        anchor = _normalize_anchor(block.get("anchor") or "", title=section_title, doc_type=doc_type)
 
         yield {
             "cis_code": cis,
             "spec_name": spec_name,
             "doc_type": doc_type,
             "section_type": block_type,
-            "section_anchor": block.get("anchor") or "",
+            "section_anchor": anchor,
             "section_title": section_title.strip(),
             "text_content": text,
             "date_notif": date_notif,
