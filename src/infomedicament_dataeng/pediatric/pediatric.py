@@ -14,7 +14,7 @@ import csv
 import re
 from dataclasses import dataclass, field
 
-from infomedicament_dataeng import pediatric_config
+from . import config as pediatric_config
 
 # --- Section extraction ---
 

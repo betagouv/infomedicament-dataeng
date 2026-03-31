@@ -104,7 +104,7 @@ class TestClassify:
 
     def test_keyword_without_indication_gives_c(self, make_rcp, monkeypatch):
         """Keyword present but no indication phrase → C=True, A=False."""
-        monkeypatch.setattr("infomedicament_dataeng.pediatric_config.REQUIRE_POSITIVE_INDICATION", True)
+        monkeypatch.setattr("infomedicament_dataeng.pediatric.config.REQUIRE_POSITIVE_INDICATION", True)
         rcp = make_rcp(
             sections={
                 "4.1": ["Posologie chez l'enfant de plus de 6 ans : 10 mg/jour"],
@@ -179,7 +179,7 @@ class TestClassify:
     def test_c_overrides_a(self, make_rcp, monkeypatch):
         """C overrides A, but B overrides C."""
         monkeypatch.setattr(
-            "infomedicament_dataeng.pediatric_config.TIE_BREAKER_PRIORITY", {"AC": "C", "BC": "B", "ABC": "B"}
+            "infomedicament_dataeng.pediatric.config.TIE_BREAKER_PRIORITY", {"AC": "C", "BC": "B", "ABC": "B"}
         )
         rcp = make_rcp(
             sections={

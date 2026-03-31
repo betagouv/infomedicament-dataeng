@@ -76,7 +76,7 @@ class TestFetchCsv:
         mock_response.read.return_value = content.encode(encoding)
         mock_response.__enter__ = lambda s: s
         mock_response.__exit__ = MagicMock(return_value=False)
-        return patch("infomedicament_dataeng.datagouv.urllib.request.urlopen", return_value=mock_response)
+        return patch("infomedicament_dataeng.datagouv.importer.urllib.request.urlopen", return_value=mock_response)
 
     def test_skips_header_row(self, sample_dataset: DataGouvDataset):
         with self._mock_urlopen(SAMPLE_CSV):
@@ -120,11 +120,18 @@ class TestImportDataset:
         mock_conn = MagicMock()
         mock_conn.cursor.return_value.__enter__ = lambda s: mock_cursor
         mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
-        return patch("infomedicament_dataeng.datagouv.psycopg2.connect", return_value=mock_conn), mock_conn, mock_cursor
+        return (
+            patch("infomedicament_dataeng.datagouv.importer.psycopg2.connect", return_value=mock_conn),
+            mock_conn,
+            mock_cursor,
+        )
 
     def test_truncates_before_insert(self, sample_dataset: DataGouvDataset):
         mock_conn_patch, mock_conn, mock_cursor = self._mock_psycopg2()
-        with mock_conn_patch, patch("infomedicament_dataeng.datagouv.fetch_csv", return_value=[["a", "b", "c"]]):
+        with (
+            mock_conn_patch,
+            patch("infomedicament_dataeng.datagouv.importer.fetch_csv", return_value=[["a", "b", "c"]]),
+        ):
             import_dataset(sample_dataset)
         truncate_call = mock_cursor.execute.call_args_list[0]
         assert "TRUNCATE" in truncate_call.args[0].upper()
@@ -133,7 +140,7 @@ class TestImportDataset:
     def test_inserts_all_rows(self, sample_dataset: DataGouvDataset):
         rows = [["val1", "val2", "val3"], ["val4", "val5", "val6"]]
         mock_conn_patch, mock_conn, mock_cursor = self._mock_psycopg2()
-        with mock_conn_patch, patch("infomedicament_dataeng.datagouv.fetch_csv", return_value=rows):
+        with mock_conn_patch, patch("infomedicament_dataeng.datagouv.importer.fetch_csv", return_value=rows):
             import_dataset(sample_dataset)
         mock_cursor.executemany.assert_called_once()
         _, insert_rows = mock_cursor.executemany.call_args.args
@@ -142,12 +149,12 @@ class TestImportDataset:
     def test_returns_row_count(self, sample_dataset: DataGouvDataset):
         rows = [["a", "b", "c"]] * 42
         mock_conn_patch, mock_conn, mock_cursor = self._mock_psycopg2()
-        with mock_conn_patch, patch("infomedicament_dataeng.datagouv.fetch_csv", return_value=rows):
+        with mock_conn_patch, patch("infomedicament_dataeng.datagouv.importer.fetch_csv", return_value=rows):
             count = import_dataset(sample_dataset)
         assert count == 42
 
     def test_commits_transaction(self, sample_dataset: DataGouvDataset):
         mock_conn_patch, mock_conn, mock_cursor = self._mock_psycopg2()
-        with mock_conn_patch, patch("infomedicament_dataeng.datagouv.fetch_csv", return_value=[]):
+        with mock_conn_patch, patch("infomedicament_dataeng.datagouv.importer.fetch_csv", return_value=[]):
             import_dataset(sample_dataset)
         mock_conn.commit.assert_called_once()

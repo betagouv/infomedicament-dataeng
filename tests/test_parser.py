@@ -2,7 +2,7 @@
 
 from bs4 import BeautifulSoup
 
-from infomedicament_dataeng.parser import (
+from infomedicament_dataeng.parsing import (
     extraire_styles,
     extraire_table_complete,
     html_vers_json,

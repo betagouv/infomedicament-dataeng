@@ -10,7 +10,7 @@ from pathlib import Path
 import psycopg2
 import yaml
 
-from .config import PostgresConfig, get_config
+from ..config import PostgresConfig, get_config
 
 logger = logging.getLogger(__name__)
 
