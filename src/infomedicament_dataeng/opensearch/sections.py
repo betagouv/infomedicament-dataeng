@@ -7,11 +7,11 @@ import unicodedata
 from collections.abc import Iterable, Iterator
 from datetime import date
 
-import pymysql
-import pymysql.cursors
 from opensearchpy import OpenSearch, helpers
+from sqlalchemy import text
 
 from ..config import DatabaseConfig, OpenSearchConfig, get_config
+from ..db import get_mysql_engine
 from .client import create_or_update_index, get_opensearch_client
 
 logger = logging.getLogger(__name__)
@@ -180,23 +180,10 @@ def load_cis_names(config: DatabaseConfig | None = None) -> dict[str, str]:
     Returns:
         Dict mapping CIS code strings to SpecDenom01 (specialité name).
     """
-    if config is None:
-        config = get_config().database
-
-    conn = pymysql.connect(
-        host=config.host,
-        user=config.user,
-        password=config.password,
-        database=config.database,
-        port=config.port,
-        cursorclass=pymysql.cursors.DictCursor,
-    )
-    try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT SpecId, SpecDenom01 FROM Specialite WHERE isBdm")
-            return {str(row["SpecId"]): row["SpecDenom01"] for row in cur.fetchall()}
-    finally:
-        conn.close()
+    engine = get_mysql_engine(config)
+    with engine.connect() as conn:
+        result = conn.execute(text("SELECT SpecId, SpecDenom01 FROM Specialite WHERE isBdm"))
+        return {str(row["SpecId"]): row["SpecDenom01"] for row in result.mappings()}
 
 
 def _extract_text(block: dict) -> str:

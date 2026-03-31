@@ -43,10 +43,10 @@ class TestGetCleanHTML:
 
 
 class TestInsertContentBlocks:
-    def test_inserts_blocks_and_returns_ids(self, fake_cursor):
-        cur = fake_cursor(ids=[1, 2, 3])
+    def test_inserts_blocks_and_returns_ids(self, fake_connection):
+        conn = fake_connection(ids=[1, 2, 3])
         result = _insert_content_blocks(
-            cur,
+            conn,
             "notices_content",
             [
                 {"content": "Bloc 1"},
@@ -55,12 +55,12 @@ class TestInsertContentBlocks:
             ],
         )
         assert result == [1, 2, 3]
-        assert len(cur.execute_calls) == 3
+        assert len(conn.execute_calls) == 3
 
-    def test_filters_blocks_without_content_children_or_text(self, fake_cursor):
-        cur = fake_cursor(ids=[1])
+    def test_filters_blocks_without_content_children_or_text(self, fake_connection):
+        conn = fake_connection(ids=[1])
         result = _insert_content_blocks(
-            cur,
+            conn,
             "notices_content",
             [
                 {"content": "Valid item"},
@@ -68,56 +68,56 @@ class TestInsertContentBlocks:
                 {"html": "<p>Test</p>"},  # no content, children, text → filtered
             ],
         )
-        assert len(cur.execute_calls) == 1
+        assert len(conn.execute_calls) == 1
         assert result == [1]
 
-    def test_returns_empty_when_all_filtered(self, fake_cursor):
-        cur = fake_cursor()
+    def test_returns_empty_when_all_filtered(self, fake_connection):
+        conn = fake_connection()
         result = _insert_content_blocks(
-            cur,
+            conn,
             "notices_content",
             [
                 {"type": "empty"},
                 {"html": "only html"},
             ],
         )
-        assert cur.execute_calls == []
+        assert conn.execute_calls == []
         assert result == []
 
-    def test_cleans_html_for_non_table_blocks(self, fake_cursor):
-        cur = fake_cursor(ids=[1])
+    def test_cleans_html_for_non_table_blocks(self, fake_connection):
+        conn = fake_connection(ids=[1])
         _insert_content_blocks(
-            cur,
+            conn,
             "notices_content",
             [
                 {"content": "text", "html": '<p><a name="test">Content</a></p>'},
             ],
         )
-        params = cur.execute_calls[-1]
-        assert params[8] == "<p>Content</p>"
+        params = conn.execute_calls[-1]
+        assert params["html"] == "<p>Content</p>"
 
-    def test_does_not_clean_html_for_table_blocks(self, fake_cursor):
-        cur = fake_cursor(ids=[1])
+    def test_does_not_clean_html_for_table_blocks(self, fake_connection):
+        conn = fake_connection(ids=[1])
         dirty_html = '<p><a name="test">Content</a></p>'
         # table block uses children to pass the content filter
         _insert_content_blocks(
-            cur,
+            conn,
             "notices_content",
             [
                 {"type": "table", "html": dirty_html, "children": [{"content": "cell"}]},
             ],
         )
-        params = cur.execute_calls[-1]
-        assert params[8] == dirty_html  # not cleaned
+        params = conn.execute_calls[-1]
+        assert params["html"] == dirty_html  # not cleaned
 
-    def test_table_block_does_not_recurse_children(self, fake_cursor):
-        cur = fake_cursor(ids=[1])
+    def test_table_block_does_not_recurse_children(self, fake_connection):
+        conn = fake_connection(ids=[1])
         _insert_content_blocks(
-            cur,
+            conn,
             "notices_content",
             [
                 {"type": "table", "html": "<table/>", "children": [{"content": "cell"}]},
             ],
         )
         # only the table itself is inserted, not the child cell
-        assert len(cur.execute_calls) == 1
+        assert len(conn.execute_calls) == 1

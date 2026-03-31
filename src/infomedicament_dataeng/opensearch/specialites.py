@@ -3,11 +3,11 @@
 import logging
 from collections.abc import Iterator
 
-import psycopg2
-import psycopg2.extras
 from opensearchpy import helpers
+from sqlalchemy import text
 
 from ..config import OpenSearchConfig, PostgresConfig, get_config
+from ..db import get_postgres_engine
 from .client import create_or_update_index, get_opensearch_client
 
 logger = logging.getLogger(__name__)
@@ -69,23 +69,22 @@ def _load_reference_data(conn) -> tuple[dict, dict, dict]:
         (substance_map, pathology_map, atc_label_map) where atc_label_map maps
         ATC code → set of labels (technical and friendly).
     """
-    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-        cur.execute('SELECT "NomId", "NomLib" FROM resume_substances')
-        substance_map = {str(row["NomId"]).strip(): row["NomLib"] for row in cur.fetchall()}
+    result = conn.execute(text('SELECT "NomId", "NomLib" FROM resume_substances'))
+    substance_map = {str(row["NomId"]).strip(): row["NomLib"] for row in result.mappings()}
 
-        cur.execute('SELECT "codePatho", "NomPatho" FROM resume_pathologies')
-        pathology_map = {str(row["codePatho"]).strip(): row["NomPatho"] for row in cur.fetchall()}
+    result = conn.execute(text('SELECT "codePatho", "NomPatho" FROM resume_pathologies'))
+    pathology_map = {str(row["codePatho"]).strip(): row["NomPatho"] for row in result.mappings()}
 
-        atc_label_map: dict[str, set[str]] = {}
+    atc_label_map: dict[str, set[str]] = {}
 
-        cur.execute("SELECT code, label_court FROM atc WHERE code IS NOT NULL AND label_court IS NOT NULL")
-        for row in cur.fetchall():
-            atc_label_map.setdefault(row["code"], set()).add(row["label_court"])
+    result = conn.execute(text("SELECT code, label_court FROM atc WHERE code IS NOT NULL AND label_court IS NOT NULL"))
+    for row in result.mappings():
+        atc_label_map.setdefault(row["code"], set()).add(row["label_court"])
 
-        for table in ("ref_atc_friendly_niveau_1", "ref_atc_friendly_niveau_2"):
-            cur.execute(f"SELECT code, libelle FROM {table} WHERE code IS NOT NULL AND libelle IS NOT NULL")
-            for row in cur.fetchall():
-                atc_label_map.setdefault(row["code"], set()).add(row["libelle"])
+    for table in ("ref_atc_friendly_niveau_1", "ref_atc_friendly_niveau_2"):
+        result = conn.execute(text(f"SELECT code, libelle FROM {table} WHERE code IS NOT NULL AND libelle IS NOT NULL"))
+        for row in result.mappings():
+            atc_label_map.setdefault(row["code"], set()).add(row["libelle"])
 
     return substance_map, pathology_map, atc_label_map
 
@@ -97,32 +96,30 @@ def _iter_specialite_docs(
     atc_label_map: dict,
 ) -> Iterator[dict]:
     """Yield one OpenSearch document per CIS code from resume_medicaments."""
-    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-        cur.execute('SELECT "groupName", "specialites", "subsIds", "pathosCodes", "atc5Code" FROM resume_medicaments')
+    result = conn.execute(
+        text('SELECT "groupName", "specialites", "subsIds", "pathosCodes", "atc5Code" FROM resume_medicaments')
+    )
+    for group in result.mappings():
+        substances = [substance_map[sid.strip()] for sid in (group["subsIds"] or []) if sid.strip() in substance_map]
+        pathologies = [
+            pathology_map[code.strip()] for code in (group["pathosCodes"] or []) if code.strip() in pathology_map
+        ]
 
-        for group in cur.fetchall():
-            substances = [
-                substance_map[sid.strip()] for sid in (group["subsIds"] or []) if sid.strip() in substance_map
-            ]
-            pathologies = [
-                pathology_map[code.strip()] for code in (group["pathosCodes"] or []) if code.strip() in pathology_map
-            ]
+        atc_labels: list[str] = []
+        if group["atc5Code"]:
+            for code in _atc_ancestor_codes(group["atc5Code"]):
+                atc_labels.append(code)
+                atc_labels.extend(atc_label_map.get(code, []))
 
-            atc_labels: list[str] = []
-            if group["atc5Code"]:
-                for code in _atc_ancestor_codes(group["atc5Code"]):
-                    atc_labels.append(code)
-                    atc_labels.extend(atc_label_map.get(code, []))
-
-            for spec in group["specialites"] or []:
-                cis_code, spec_name = spec[0], spec[1]
-                yield {
-                    "cis_code": str(cis_code),
-                    "spec_name": spec_name,
-                    "substances": substances,
-                    "pathologies": pathologies,
-                    "atc_labels": atc_labels,
-                }
+        for spec in group["specialites"] or []:
+            cis_code, spec_name = spec[0], spec[1]
+            yield {
+                "cis_code": str(cis_code),
+                "spec_name": spec_name,
+                "substances": substances,
+                "pathologies": pathologies,
+                "atc_labels": atc_labels,
+            }
 
 
 def index_specialites(
@@ -141,14 +138,8 @@ def index_specialites(
     client = get_opensearch_client(config)
     create_or_update_index(client, index_name, INDEX_MAPPING)
 
-    conn = psycopg2.connect(
-        host=pg_config.host,
-        user=pg_config.user,
-        password=pg_config.password,
-        dbname=pg_config.database,
-        port=pg_config.port,
-    )
-    try:
+    engine = get_postgres_engine(pg_config)
+    with engine.connect() as conn:
         substance_map, pathology_map, atc_label_map = _load_reference_data(conn)
         logger.info(
             f"Loaded {len(substance_map)} substances, {len(pathology_map)} pathologies, {len(atc_label_map)} ATC codes"
@@ -165,8 +156,6 @@ def index_specialites(
                 yield {"_index": index_name, "_id": doc["cis_code"], "_source": doc}
 
         success, failed = helpers.bulk(client, _actions(), raise_on_error=False, stats_only=True)
-    finally:
-        conn.close()
 
     if failed:
         logger.warning(f"{failed} documents failed to index")
