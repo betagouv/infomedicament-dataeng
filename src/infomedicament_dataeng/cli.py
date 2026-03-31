@@ -14,6 +14,7 @@ import chardet
 from tqdm import tqdm
 
 from .config import get_config
+from .convert import sql_to_csv
 from .datagouv import import_dataset, load_datasets
 from .db import get_authorized_cis, get_filename_to_cis_mapping, import_to_postgres
 from .io import charger_liste_cis
@@ -21,9 +22,8 @@ from .opensearch.sections import DEFAULT_INDEX as SECTIONS_DEFAULT_INDEX
 from .opensearch.sections import index_from_local, index_from_s3
 from .opensearch.specialites import DEFAULT_INDEX as SPECIALITES_DEFAULT_INDEX
 from .opensearch.specialites import index_specialites
-from .parser import html_vers_json
+from .parsing import html_vers_json
 from .s3 import S3Client
-from .sql_to_csv import sql_to_csv
 
 logger = logging.getLogger(__name__)
 
