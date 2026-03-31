@@ -7,10 +7,11 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
-import psycopg2
 import yaml
+from sqlalchemy import text
 
 from ..config import PostgresConfig, get_config
+from ..db import get_postgres_engine
 
 logger = logging.getLogger(__name__)
 
@@ -89,24 +90,18 @@ def import_dataset(dataset: DataGouvDataset, config: PostgresConfig | None = Non
     rows = valid_rows
     logger.info(f"Fetched {len(rows)} rows for table '{dataset.postgresql_table}'")
 
-    conn = psycopg2.connect(
-        host=config.host,
-        user=config.user,
-        password=config.password,
-        dbname=config.database,
-        port=config.port,
-    )
-    try:
-        with conn.cursor() as cur:
-            cur.execute(f"TRUNCATE TABLE {dataset.postgresql_table}")
-            col_names = ", ".join(c.name for c in dataset.columns)
-            placeholders = ", ".join("%s" for _ in dataset.columns)
-            cur.executemany(
-                f"INSERT INTO {dataset.postgresql_table} ({col_names}) VALUES ({placeholders})",
-                rows,
+    col_keys = [c.name for c in dataset.columns]
+    col_names = ", ".join(col_keys)
+    placeholders = ", ".join(f":{k}" for k in col_keys)
+    rows_as_dicts = [dict(zip(col_keys, row)) for row in rows]
+
+    engine = get_postgres_engine(config)
+    with engine.begin() as conn:
+        conn.execute(text(f"TRUNCATE TABLE {dataset.postgresql_table}"))
+        if rows_as_dicts:
+            conn.execute(
+                text(f"INSERT INTO {dataset.postgresql_table} ({col_names}) VALUES ({placeholders})"),
+                rows_as_dicts,
             )
-        conn.commit()
-        logger.info(f"Imported {len(rows)} rows into '{dataset.postgresql_table}'")
-        return len(rows)
-    finally:
-        conn.close()
+    logger.info(f"Imported {len(rows)} rows into '{dataset.postgresql_table}'")
+    return len(rows)

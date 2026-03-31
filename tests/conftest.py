@@ -7,8 +7,19 @@ import pytest
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 
-class FakeCursor:
-    """Minimal fake psycopg2 cursor for testing."""
+class _FakeResult:
+    def __init__(self, next_id=None):
+        self._next_id = next_id
+
+    def fetchone(self):
+        return (self._next_id,) if self._next_id is not None else None
+
+    def fetchall(self):
+        return []
+
+
+class FakeConnection:
+    """Minimal fake SQLAlchemy connection for testing _insert_content_blocks."""
 
     def __init__(self, ids=()):
         self._ids = iter(ids)
@@ -16,14 +27,15 @@ class FakeCursor:
 
     def execute(self, _sql, params=None):
         self.execute_calls.append(params)
-
-    def fetchone(self):
-        return (next(self._ids),)
+        try:
+            return _FakeResult(next(self._ids))
+        except StopIteration:
+            return _FakeResult()
 
 
 @pytest.fixture
-def fake_cursor():
-    return FakeCursor
+def fake_connection():
+    return FakeConnection
 
 
 @pytest.fixture
