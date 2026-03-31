@@ -32,7 +32,7 @@ def sql_to_csv(
     output_path: Path | None = None,
     encoding: str = "iso-8859-1",  # This is the encoding of the CODEX extracts
     dialect: str = "tsql",  # This is the SQL format of the CODEX extracts
-) -> dict[str, int]:
+) -> dict[str, str | int | None]:
     """
     Converts a SQL file to CSV
 
