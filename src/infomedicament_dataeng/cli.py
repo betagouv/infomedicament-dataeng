@@ -23,7 +23,7 @@ from .opensearch.sections import index_from_local, index_from_s3
 from .opensearch.specialites import DEFAULT_INDEX as SPECIALITES_DEFAULT_INDEX
 from .opensearch.specialites import index_specialites
 from .parsing import html_vers_json
-from .s3 import S3Client
+from .s3 import make_s3_client
 
 logger = logging.getLogger(__name__)
 
@@ -191,13 +191,9 @@ def traiter_depuis_s3(
         staging: If True, process only files in the staging subdirectory and move them
                  to the main prefix after each batch is written.
     """
+    s3_client = make_s3_client()
+
     config = get_config()
-
-    if not config.s3.is_configured():
-        raise RuntimeError("S3 credentials not configured. Set S3_KEY_ID and S3_KEY_SECRET.")
-
-    s3_client = S3Client(config.s3)
-
     logger.info("S3 mode - Clever Cloud Cellar")
     logger.info(f"Bucket: {config.s3.bucket_name}")
     html_prefix = config.s3.notice_prefix if pattern == "N" else config.s3.rcp_prefix
@@ -319,10 +315,11 @@ def traiter_depuis_s3(
 
 
 def run_pediatric_classification(
-    rcp_lines: list[str],
+    rcp_lines,  # Iterable[str] — can be a list, file object, or generator
     truth_path: str | None,
     output_path: str,
     debug: bool = False,
+    batch_size: int = 500,
 ) -> None:
     """Run pediatric classification on parsed RCPs and optionally evaluate."""
     from .db import get_cis_atc_mapping
@@ -335,94 +332,113 @@ def run_pediatric_classification(
         load_ground_truth,
     )
 
-    # Load ground truth for evaluation
+    # Load ground truth and ATC mapping upfront (both small)
     ground_truth = {}
     if truth_path:
         ground_truth = load_ground_truth(truth_path)
         logger.info(f"Ground truth loaded: {len(ground_truth)} entries")
 
-    # Load ATC codes from PostgreSQL
     atc_mapping = get_cis_atc_mapping()
     logger.info(f"ATC mapping loaded: {len(atc_mapping)} entries")
 
-    # Index parsed RCPs by CIS code
-    rcp_by_cis: dict[str, dict] = {}
-    for line in rcp_lines:
-        if not line.strip():
-            continue
-        rcp_json = json.loads(line)
-        source = rcp_json.get("source", {})
-        cis = source.get("cis", "") if isinstance(source, dict) else ""
-        if cis:
-            rcp_by_cis[cis] = rcp_json
-
-    logger.info(f"Loaded {len(rcp_by_cis)} parsed RCPs")
-
-    # Determine which CIS codes to include in output
+    # Build CSV header and write it once (truncates the file)
+    header = ["cis", "pred_A", "pred_B", "pred_C"]
     if ground_truth:
-        all_cis = list(ground_truth.keys())
-    else:
-        all_cis = list(rcp_by_cis.keys())
+        header += ["truth_A", "truth_B", "truth_C", "match_A", "match_B", "match_C"]
+    header += ["a_reasons", "b_reasons", "c_reasons", "keywords_41_42", "keywords_43", "evidence_41_42", "evidence_43"]
+    with open(output_path, "w", encoding="utf-8", newline="") as f:
+        csv.writer(f).writerow(header)
 
-    # Classify each CIS
-    predictions: list[PediatricClassification | None] = []
-    missing_rcp = 0
-    for cis in all_cis:
-        rcp_json = rcp_by_cis.get(cis)
-        if rcp_json:
-            atc_code = atc_mapping.get(cis, "")
-            predictions.append(classify(rcp_json, atc_code=atc_code))
-        else:
-            predictions.append(None)
-            missing_rcp += 1
-
-    logger.info(f"Classified {len(all_cis) - missing_rcp} drugs, {missing_rcp} missing RCP")
-
-    # Write debug sections file
+    # Truncate debug file once if needed
+    debug_path = None
     if debug:
         debug_path = os.path.join(os.path.dirname(output_path) or ".", "debug_sections.jsonl")
-        with open(debug_path, "w", encoding="utf-8") as f_debug:
-            for cis in all_cis:
-                rcp_json = rcp_by_cis.get(cis)
-                if not rcp_json:
-                    continue
-                entry = {
-                    "cis": cis,
-                    "atc_code": atc_mapping.get(cis, ""),
-                    "raw_41": "\n".join(extract_section_texts(rcp_json, "4.1")),
-                    "raw_42": "\n".join(extract_section_texts(rcp_json, "4.2")),
-                    "raw_43": "\n".join(extract_section_texts(rcp_json, "4.3")),
-                }
-                f_debug.write(json.dumps(entry, ensure_ascii=False) + "\n")
-        logger.info(f"Debug sections written to {debug_path}")
+        with open(debug_path, "w", encoding="utf-8"):
+            pass
 
-    # Write predictions CSV
-    with open(output_path, "w", encoding="utf-8", newline="") as f:
-        writer = csv.writer(f)
-        header = ["cis", "pred_A", "pred_B", "pred_C"]
-        if ground_truth:
-            header += ["truth_A", "truth_B", "truth_C", "match_A", "match_B", "match_C"]
-        header += [
-            "a_reasons",
-            "b_reasons",
-            "c_reasons",
-            "keywords_41_42",
-            "keywords_43",
-            "evidence_41_42",
-            "evidence_43",
-        ]
-        writer.writerow(header)
+    seen_cis: set[str] = set()
+    all_predictions: list[PediatricClassification] = []
+    it = iter(rcp_lines)
+    batch_num = 0
 
-        for cis, pred in zip(all_cis, predictions):
-            gt = ground_truth.get(cis, {})
+    while True:
+        batch = []
+        for _ in range(batch_size):
+            try:
+                batch.append(next(it))
+            except StopIteration:
+                break
+        if not batch:
+            break
+        batch_num += 1
+        logger.info(f"Processing batch {batch_num}…")
 
-            if pred is None:
-                # No parsed RCP available
-                row = [cis, "", "", ""]
+        # Parse only this batch into memory
+        rcp_by_cis: dict[str, dict] = {}
+        for line in batch:
+            rcp_json = json.loads(line)
+            source = rcp_json.get("source", {})
+            cis = source.get("cis", "") if isinstance(source, dict) else ""
+            if cis:
+                rcp_by_cis[cis] = rcp_json
+
+        # Append debug entries for this batch
+        if debug_path:
+            with open(debug_path, "a", encoding="utf-8") as f_debug:
+                for cis, rcp_json in rcp_by_cis.items():
+                    entry = {
+                        "cis": cis,
+                        "atc_code": atc_mapping.get(cis, ""),
+                        "raw_41": "\n".join(extract_section_texts(rcp_json, "4.1")),
+                        "raw_42": "\n".join(extract_section_texts(rcp_json, "4.2")),
+                        "raw_43": "\n".join(extract_section_texts(rcp_json, "4.3")),
+                    }
+                    f_debug.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+        # Classify and append CSV rows
+        with open(output_path, "a", encoding="utf-8", newline="") as f:
+            writer = csv.writer(f)
+            for cis, rcp_json in rcp_by_cis.items():
+                pred = classify(rcp_json, atc_code=atc_mapping.get(cis, ""))
+                seen_cis.add(cis)
                 if ground_truth:
-                    truth_a = gt.get("A", "")
-                    truth_b = gt.get("B", "")
-                    truth_c = gt.get("C", "")
+                    all_predictions.append(pred)
+
+                gt = ground_truth.get(cis, {})
+                row = [pred.cis, int(pred.condition_a), int(pred.condition_b), int(pred.condition_c)]
+                if ground_truth:
+                    truth_a, truth_b, truth_c = gt.get("A", ""), gt.get("B", ""), gt.get("C", "")
+                    row += [
+                        int(truth_a) if isinstance(truth_a, bool) else "",
+                        int(truth_b) if isinstance(truth_b, bool) else "",
+                        int(truth_c) if isinstance(truth_c, bool) else "",
+                        int(pred.condition_a == truth_a) if isinstance(truth_a, bool) else "",
+                        int(pred.condition_b == truth_b) if isinstance(truth_b, bool) else "",
+                        int(pred.condition_c == truth_c) if isinstance(truth_c, bool) else "",
+                    ]
+                kw_41_42 = [kw for m in pred.matches_41_42 for kw in m.keywords]
+                kw_43 = [kw for m in pred.matches_43 for kw in m.keywords]
+                row += [
+                    " | ".join(pred.a_reasons),
+                    " | ".join(pred.b_reasons),
+                    " | ".join(pred.c_reasons),
+                    " | ".join(dict.fromkeys(kw_41_42)),
+                    " | ".join(dict.fromkeys(kw_43)),
+                    " ||| ".join(m.text[:200] for m in pred.matches_41_42),
+                    " ||| ".join(m.text[:200] for m in pred.matches_43),
+                ]
+                writer.writerow(row)
+
+    # Write "missing RCP" rows for ground truth CIS codes not found in any batch
+    if ground_truth:
+        missing_cis = [cis for cis in ground_truth if cis not in seen_cis]
+        if missing_cis:
+            with open(output_path, "a", encoding="utf-8", newline="") as f:
+                writer = csv.writer(f)
+                for cis in missing_cis:
+                    gt = ground_truth[cis]
+                    truth_a, truth_b, truth_c = gt.get("A", ""), gt.get("B", ""), gt.get("C", "")
+                    row = [cis, "", "", ""]
                     row += [
                         int(truth_a) if isinstance(truth_a, bool) else "",
                         int(truth_b) if isinstance(truth_b, bool) else "",
@@ -431,52 +447,17 @@ def run_pediatric_classification(
                         "",
                         "",
                     ]
-                row += ["", "", "RCP manquant", "", "", "", ""]
-                writer.writerow(row)
-                continue
+                    row += ["", "", "RCP manquant", "", "", "", ""]
+                    writer.writerow(row)
 
-            row = [
-                pred.cis,
-                int(pred.condition_a),
-                int(pred.condition_b),
-                int(pred.condition_c),
-            ]
-            if ground_truth:
-                truth_a = gt.get("A", "")
-                truth_b = gt.get("B", "")
-                truth_c = gt.get("C", "")
-                row += [
-                    int(truth_a) if isinstance(truth_a, bool) else "",
-                    int(truth_b) if isinstance(truth_b, bool) else "",
-                    int(truth_c) if isinstance(truth_c, bool) else "",
-                    int(pred.condition_a == truth_a) if isinstance(truth_a, bool) else "",
-                    int(pred.condition_b == truth_b) if isinstance(truth_b, bool) else "",
-                    int(pred.condition_c == truth_c) if isinstance(truth_c, bool) else "",
-                ]
-            # Explainability columns
-            kw_41_42 = []
-            for m in pred.matches_41_42:
-                kw_41_42.extend(m.keywords)
-            kw_43 = []
-            for m in pred.matches_43:
-                kw_43.extend(m.keywords)
-            row += [
-                " | ".join(pred.a_reasons),
-                " | ".join(pred.b_reasons),
-                " | ".join(pred.c_reasons),
-                " | ".join(dict.fromkeys(kw_41_42)),
-                " | ".join(dict.fromkeys(kw_43)),
-                " ||| ".join(m.text[:200] for m in pred.matches_41_42),
-                " ||| ".join(m.text[:200] for m in pred.matches_43),
-            ]
-            writer.writerow(row)
-
+    missing_count = len(ground_truth) - len(seen_cis) if ground_truth else 0
+    logger.info(f"Classified {len(seen_cis)} drugs, {missing_count} missing RCP")
     logger.info(f"Predictions written to {output_path}")
+    if debug_path:
+        logger.info(f"Debug sections written to {debug_path}")
 
-    # Evaluate if ground truth provided
     if ground_truth:
-        classified = [p for p in predictions if p is not None]
-        metrics = compute_metrics(classified, ground_truth)
+        metrics = compute_metrics(all_predictions, ground_truth)
         print(format_metrics(metrics))
 
 
@@ -489,12 +470,8 @@ def db_import(pattern: str, limite: int | None = None, since: date | None = None
         limite: Limit total number of records imported (for testing).
         since: If provided, only import JSONL files dated on or after this date.
     """
+    s3_client = make_s3_client()
     config = get_config()
-
-    if not config.s3.is_configured():
-        raise RuntimeError("S3 credentials not configured. Set S3_KEY_ID and S3_KEY_SECRET.")
-
-    s3_client = S3Client(config.s3)
     main_table = "notices" if pattern == "N" else "rcp"
     content_table = "notices_content" if pattern == "N" else "rcp_content"
 
@@ -658,6 +635,7 @@ Environment variables for database:
     )
     ped_parser.add_argument("--truth", help="Ground truth CSV (for evaluation)")
     ped_parser.add_argument("--output", "-o", default="data/predictions.csv", help="Output predictions CSV")
+    ped_parser.add_argument("--batch-size", type=int, default=500, help="RCPs per batch (default: 500)")
     ped_parser.add_argument("--debug", action="store_true", help="Write debug_sections.jsonl with raw section texts")
 
     # Index into OpenSearch (subcommand group)
@@ -755,20 +733,30 @@ Environment variables for database:
         try:
             if args.local_rcp:
                 with open(args.local_rcp, encoding="utf-8") as f:
-                    lines = [line for line in f.read().split("\n") if line.strip()]
-                run_pediatric_classification(lines, args.truth, args.output, debug=args.debug)
+                    run_pediatric_classification(
+                        (line for line in f if line.strip()),
+                        args.truth,
+                        args.output,
+                        debug=args.debug,
+                        batch_size=args.batch_size,
+                    )
             else:
-                config = get_config()
-                if not config.s3.is_configured():
-                    raise RuntimeError("S3 credentials not configured. Set S3_KEY_ID and S3_KEY_SECRET.")
-                s3_client = S3Client(config.s3)
+                s3_client = make_s3_client()
                 keys = list(s3_client.list_parsed_files("R", since=args.since))
                 logger.info(f"Found {len(keys)} RCP JSONL file(s) in S3")
-                all_lines: list[str] = []
-                for key in tqdm(keys, desc="Downloading", unit="file"):
-                    content = s3_client.download_file_content(key)
-                    all_lines.extend(line for line in content.decode("utf-8").split("\n") if line.strip())
-                run_pediatric_classification(all_lines, args.truth, args.output, debug=args.debug)
+
+                def s3_lines():
+                    for key in tqdm(keys, desc="Files", unit="file"):
+                        content = s3_client.download_file_content(key)
+                        yield from (line for line in content.decode("utf-8").split("\n") if line.strip())
+
+                run_pediatric_classification(
+                    s3_lines(),
+                    args.truth,
+                    args.output,
+                    debug=args.debug,
+                    batch_size=args.batch_size,
+                )
         except Exception as e:
             logger.exception(f"Error: {e}")
             raise SystemExit(1)

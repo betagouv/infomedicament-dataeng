@@ -221,6 +221,7 @@ Options:
 - `--local-rcp PATH`: Local parsed RCP JSONL file (mutually exclusive with `--s3`)
 - `--s3`: Fetch parsed RCP JSONL files directly from S3 (mutually exclusive with `--local-rcp`)
 - `--since YYYY-MM-DD`: S3 mode only — only use JSONL files dated on or after this date
+- `--batch-size`: Number of RCPs classified per batch (default: 500). Files are streamed and processed incrementally to keep memory usage bounded.
 - `--truth`: Ground truth CSV for evaluation (columns: `cis,code_atc,A:...,B:...,C:...` with `oui/non` values)
 - `--output, -o`: Output predictions CSV (default: `data/predictions.csv`)
 

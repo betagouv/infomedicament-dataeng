@@ -7,9 +7,17 @@ from typing import Iterator
 import boto3
 from botocore.config import Config as BotoConfig
 
-from .config import S3Config
+from .config import S3Config, get_config
 
 logger = logging.getLogger(__name__)
+
+
+def make_s3_client() -> "S3Client":
+    """Create an S3Client from environment config, raising if not configured."""
+    config = get_config()
+    if not config.s3.is_configured():
+        raise RuntimeError("S3 credentials not configured. Set S3_KEY_ID and S3_KEY_SECRET.")
+    return S3Client(config.s3)
 
 
 class S3Client:
