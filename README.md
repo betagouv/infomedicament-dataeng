@@ -214,24 +214,29 @@ Classify medications for pediatric use based on their parsed RCP content (sectio
 - **C**: Sur avis d'un professionnel de santé (requires professional advice)
 
 ```bash
-poetry run infomedicament-dataeng classify-pediatric --rcp <jsonl_file> [options]
+poetry run infomedicament-dataeng classify-pediatric (--local-rcp <path> | --s3) [options]
 ```
 
 Options:
-- `--rcp`: Parsed RCP JSONL file (required, produced by the `s3` or `local` commands with `--pattern R`)
+- `--local-rcp PATH`: Local parsed RCP JSONL file (mutually exclusive with `--s3`)
+- `--s3`: Fetch parsed RCP JSONL files directly from S3 (mutually exclusive with `--local-rcp`)
+- `--since YYYY-MM-DD`: S3 mode only — only use JSONL files dated on or after this date
 - `--truth`: Ground truth CSV for evaluation (columns: `cis,code_atc,A:...,B:...,C:...` with `oui/non` values)
 - `--output, -o`: Output predictions CSV (default: `data/predictions.csv`)
 
-Example:
+Examples:
 ```bash
-# Produce parsed RCPs first
-poetry run infomedicament-dataeng s3 --cis-file data/test_set_cis.csv --pattern R -o data/rcp_pediatrie.jsonl
-
-# Classify and evaluate against ground truth
+# From a local file (development / evaluation)
 poetry run infomedicament-dataeng classify-pediatric \
-  --rcp data/rcp_pediatrie.jsonl \
+  --local-rcp data/rcp_pediatrie.jsonl \
   --truth data/ground_truth.csv \
   -o data/predictions.csv
+
+# From S3 (no prior download needed)
+poetry run infomedicament-dataeng classify-pediatric --s3 -o data/predictions.csv
+
+# From S3, only files produced since a given date
+poetry run infomedicament-dataeng classify-pediatric --s3 --since 2026-01-01 -o data/predictions.csv
 ```
 
 The predictions CSV includes explainability columns (matched keywords, evidence text, C-reasons) for manual review.

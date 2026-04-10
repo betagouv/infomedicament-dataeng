@@ -319,7 +319,7 @@ def traiter_depuis_s3(
 
 
 def run_pediatric_classification(
-    rcp_path: str,
+    rcp_lines: list[str],
     truth_path: str | None,
     output_path: str,
     debug: bool = False,
@@ -347,13 +347,14 @@ def run_pediatric_classification(
 
     # Index parsed RCPs by CIS code
     rcp_by_cis: dict[str, dict] = {}
-    with open(rcp_path, encoding="utf-8") as f:
-        for line in f:
-            rcp_json = json.loads(line)
-            source = rcp_json.get("source", {})
-            cis = source.get("cis", "") if isinstance(source, dict) else ""
-            if cis:
-                rcp_by_cis[cis] = rcp_json
+    for line in rcp_lines:
+        if not line.strip():
+            continue
+        rcp_json = json.loads(line)
+        source = rcp_json.get("source", {})
+        cis = source.get("cis", "") if isinstance(source, dict) else ""
+        if cis:
+            rcp_by_cis[cis] = rcp_json
 
     logger.info(f"Loaded {len(rcp_by_cis)} parsed RCPs")
 
@@ -646,7 +647,15 @@ Environment variables for database:
 
     # Pediatric classification mode
     ped_parser = subparsers.add_parser("classify-pediatric", help="Classify drugs for pediatric use")
-    ped_parser.add_argument("--rcp", required=True, help="Parsed RCP JSONL file")
+    ped_source = ped_parser.add_mutually_exclusive_group(required=True)
+    ped_source.add_argument("--local-rcp", metavar="PATH", help="Parsed RCP JSONL file (local)")
+    ped_source.add_argument("--s3", action="store_true", help="Fetch parsed RCP JSONL files from S3")
+    ped_parser.add_argument(
+        "--since",
+        type=lambda s: datetime.strptime(s, "%Y-%m-%d").date(),
+        metavar="YYYY-MM-DD",
+        help="S3 mode only: only use JSONL files dated on or after this date",
+    )
     ped_parser.add_argument("--truth", help="Ground truth CSV (for evaluation)")
     ped_parser.add_argument("--output", "-o", default="data/predictions.csv", help="Output predictions CSV")
     ped_parser.add_argument("--debug", action="store_true", help="Write debug_sections.jsonl with raw section texts")
@@ -744,7 +753,22 @@ Environment variables for database:
 
     elif args.command == "classify-pediatric":
         try:
-            run_pediatric_classification(args.rcp, args.truth, args.output, debug=args.debug)
+            if args.local_rcp:
+                with open(args.local_rcp, encoding="utf-8") as f:
+                    lines = [line for line in f.read().split("\n") if line.strip()]
+                run_pediatric_classification(lines, args.truth, args.output, debug=args.debug)
+            else:
+                config = get_config()
+                if not config.s3.is_configured():
+                    raise RuntimeError("S3 credentials not configured. Set S3_KEY_ID and S3_KEY_SECRET.")
+                s3_client = S3Client(config.s3)
+                keys = list(s3_client.list_parsed_files("R", since=args.since))
+                logger.info(f"Found {len(keys)} RCP JSONL file(s) in S3")
+                all_lines: list[str] = []
+                for key in tqdm(keys, desc="Downloading", unit="file"):
+                    content = s3_client.download_file_content(key)
+                    all_lines.extend(line for line in content.decode("utf-8").split("\n") if line.strip())
+                run_pediatric_classification(all_lines, args.truth, args.output, debug=args.debug)
         except Exception as e:
             logger.exception(f"Error: {e}")
             raise SystemExit(1)
