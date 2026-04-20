@@ -138,6 +138,26 @@ class OpenSearchConfig:
 
 
 @dataclass
+class AlbertConfig:
+    """Albert API configuration for embeddings."""
+
+    api_key: str
+    base_url: str
+    model: str
+
+    @classmethod
+    def from_env(cls) -> "AlbertConfig":
+        return cls(
+            api_key=os.environ.get("ALBERT_API_KEY", ""),
+            base_url=os.environ.get("ALBERT_API_BASE_URL", "https://albert.api.etalab.gouv.fr/v1"),
+            model=os.environ.get("ALBERT_EMBEDDING_MODEL", "BAAI/bge-m3"),
+        )
+
+    def is_configured(self) -> bool:
+        return bool(self.api_key)
+
+
+@dataclass
 class AppConfig:
     """Application configuration."""
 
@@ -145,6 +165,7 @@ class AppConfig:
     database: DatabaseConfig
     postgres: PostgresConfig
     opensearch: OpenSearchConfig
+    albert: AlbertConfig
     cdn_base_url: str
     log_level: str
 
@@ -156,6 +177,7 @@ class AppConfig:
             database=DatabaseConfig.from_env(),
             postgres=PostgresConfig.from_env(),
             opensearch=OpenSearchConfig.from_env(),
+            albert=AlbertConfig.from_env(),
             cdn_base_url=os.environ.get(
                 "CDN_BASE_URL", "https://cellar-c2.services.clever-cloud.com/info-medicaments/exports/images"
             ),

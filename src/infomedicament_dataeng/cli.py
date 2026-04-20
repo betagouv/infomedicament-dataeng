@@ -18,6 +18,8 @@ from .convert import sql_to_csv
 from .datagouv import import_dataset, load_datasets
 from .db import get_authorized_cis, get_filename_to_cis_mapping, import_to_postgres
 from .io import charger_liste_cis
+from .opensearch.notice_chunks import DEFAULT_INDEX as NOTICE_CHUNKS_DEFAULT_INDEX
+from .opensearch.notice_chunks import index_from_local as index_notice_chunks_from_local
 from .opensearch.sections import DEFAULT_INDEX as SECTIONS_DEFAULT_INDEX
 from .opensearch.sections import index_from_local, index_from_s3
 from .opensearch.specialites import DEFAULT_INDEX as SPECIALITES_DEFAULT_INDEX
@@ -666,6 +668,16 @@ Environment variables for database:
     )
     specialites_parser.add_argument("--limite", type=int, help="Cap on documents indexed (for testing)")
 
+    # index-opensearch notice-chunks
+    notice_chunks_parser = os_subparsers.add_parser(
+        "notice-chunks", help="Index notices as fine-grained vector-embedded chunks"
+    )
+    notice_chunks_parser.add_argument("--input", required=True, help="Local parsed notice JSONL file")
+    notice_chunks_parser.add_argument(
+        "--index", default=NOTICE_CHUNKS_DEFAULT_INDEX, help=f"Index name (default: {NOTICE_CHUNKS_DEFAULT_INDEX})"
+    )
+    notice_chunks_parser.add_argument("--limite", type=int, help="Cap on records indexed (for testing)")
+
     # Global options
     parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose logging")
 
@@ -781,6 +793,16 @@ Environment variables for database:
         elif args.target == "specialites":
             try:
                 index_specialites(index_name=args.index, limite=args.limite)
+            except Exception as e:
+                logger.exception(f"Error: {e}")
+                raise SystemExit(1)
+        elif args.target == "notice-chunks":
+            try:
+                index_notice_chunks_from_local(
+                    path=args.input,
+                    index_name=args.index,
+                    limite=args.limite,
+                )
             except Exception as e:
                 logger.exception(f"Error: {e}")
                 raise SystemExit(1)

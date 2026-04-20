@@ -19,6 +19,7 @@ psycopg2-binary = "^2.9.11"
 sqlalchemy = "^2.0"
 pyyaml = "^6.0.3"
 opensearch-py = "^3.1.0"
+openai = "^1.0"
 requests = "^2.33.0"
 
 [tool.poetry.group.dev.dependencies]
