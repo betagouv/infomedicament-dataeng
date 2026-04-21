@@ -20,6 +20,7 @@ from .db import get_authorized_cis, get_filename_to_cis_mapping, import_to_postg
 from .io import charger_liste_cis
 from .opensearch.notice_chunks import DEFAULT_INDEX as NOTICE_CHUNKS_DEFAULT_INDEX
 from .opensearch.notice_chunks import index_from_local as index_notice_chunks_from_local
+from .opensearch.notice_chunks import index_from_s3 as index_notice_chunks_from_s3
 from .opensearch.sections import DEFAULT_INDEX as SECTIONS_DEFAULT_INDEX
 from .opensearch.sections import index_from_local, index_from_s3
 from .opensearch.specialites import DEFAULT_INDEX as SPECIALITES_DEFAULT_INDEX
@@ -672,7 +673,22 @@ Environment variables for database:
     notice_chunks_parser = os_subparsers.add_parser(
         "notice-chunks", help="Index notices as fine-grained vector-embedded chunks"
     )
-    notice_chunks_parser.add_argument("--input", required=True, help="Local parsed notice JSONL file")
+    nc_source = notice_chunks_parser.add_mutually_exclusive_group(required=True)
+    nc_source.add_argument("--input", help="Local parsed notice JSONL file")
+    nc_source.add_argument("--s3", action="store_true", help="Read from S3 parsed notice files")
+    notice_chunks_parser.add_argument("--since", help="S3 mode only: only process files dated on or after YYYY-MM-DD")
+    notice_chunks_parser.add_argument(
+        "--save-embeddings", action="store_true", help="Write per-CIS embedding cache to S3"
+    )
+    notice_chunks_parser.add_argument(
+        "--load-embeddings", action="store_true", help="Load embeddings from S3 cache (skip Albert API on cache hit)"
+    )
+    notice_chunks_parser.add_argument(
+        "--chunk-batch-size", type=int, default=512, help="Chunks per embedding API call (default: 512)"
+    )
+    notice_chunks_parser.add_argument(
+        "--requests-per-minute", type=int, default=500, help="Albert API rate limit (default: 500)"
+    )
     notice_chunks_parser.add_argument(
         "--index", default=NOTICE_CHUNKS_DEFAULT_INDEX, help=f"Index name (default: {NOTICE_CHUNKS_DEFAULT_INDEX})"
     )
@@ -798,11 +814,24 @@ Environment variables for database:
                 raise SystemExit(1)
         elif args.target == "notice-chunks":
             try:
-                index_notice_chunks_from_local(
-                    path=args.input,
-                    index_name=args.index,
-                    limite=args.limite,
-                )
+                if args.input:
+                    index_notice_chunks_from_local(
+                        path=args.input,
+                        index_name=args.index,
+                        limite=args.limite,
+                        chunk_batch_size=args.chunk_batch_size,
+                        requests_per_minute=args.requests_per_minute,
+                    )
+                else:
+                    index_notice_chunks_from_s3(
+                        index_name=args.index,
+                        limite=args.limite,
+                        since=args.since,
+                        chunk_batch_size=args.chunk_batch_size,
+                        requests_per_minute=args.requests_per_minute,
+                        save_embeddings=args.save_embeddings,
+                        load_embeddings=args.load_embeddings,
+                    )
             except Exception as e:
                 logger.exception(f"Error: {e}")
                 raise SystemExit(1)
