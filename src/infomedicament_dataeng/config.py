@@ -139,8 +139,6 @@ class OpenSearchConfig:
 
 @dataclass
 class AlbertConfig:
-    """Albert API configuration for embeddings."""
-
     api_key: str
     base_url: str
     model: str

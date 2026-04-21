@@ -165,6 +165,14 @@ class S3Client:
         self.client.delete_object(Bucket=self.config.bucket_name, Key=source_key)
         logger.info(f"Moved {source_key} → {dest_key}")
 
+    def object_exists(self, key: str) -> bool:
+        """Return True if the object exists in the bucket."""
+        try:
+            self.client.head_object(Bucket=self.config.bucket_name, Key=key)
+            return True
+        except self.client.exceptions.ClientError:
+            return False
+
     def get_filename_from_key(self, key: str) -> str:
         """Extract the filename from an S3 key."""
         return key.split("/")[-1]

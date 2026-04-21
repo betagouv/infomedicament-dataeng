@@ -1,8 +1,28 @@
-from infomedicament_dataeng.opensearch.notice_chunks import _iter_notice_chunks, _make_embed_text
+from infomedicament_dataeng.opensearch.notice_chunks import _iter_notice_chunks, _make_embed_text, _node_text
 
 
 def _record(cis, content):
     return {"source": {"cis": cis}, "content": content}
+
+
+class TestNodeText:
+    def test_string(self):
+        assert _node_text("texte") == "texte"
+
+    def test_strips_whitespace(self):
+        assert _node_text("  texte  ") == "texte"
+
+    def test_list_joined(self):
+        assert _node_text(["a", "b", "c"]) == "a b c"
+
+    def test_none_returns_empty(self):
+        assert _node_text(None) == ""
+
+    def test_empty_string_returns_empty(self):
+        assert _node_text("") == ""
+
+    def test_empty_list_returns_empty(self):
+        assert _node_text([]) == ""
 
 
 class TestMakeEmbedText:
