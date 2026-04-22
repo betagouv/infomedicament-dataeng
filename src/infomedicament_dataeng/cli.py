@@ -684,10 +684,7 @@ Environment variables for database:
         "--load-embeddings", action="store_true", help="Load embeddings from S3 cache (skip Albert API on cache hit)"
     )
     notice_chunks_parser.add_argument(
-        "--chunk-batch-size", type=int, default=512, help="Chunks per embedding API call (default: 512)"
-    )
-    notice_chunks_parser.add_argument(
-        "--requests-per-minute", type=int, default=500, help="Albert API rate limit (default: 500)"
+        "--chunk-batch-size", type=int, default=64, help="Chunks per embedding API call (default: 64)"
     )
     notice_chunks_parser.add_argument(
         "--index", default=NOTICE_CHUNKS_DEFAULT_INDEX, help=f"Index name (default: {NOTICE_CHUNKS_DEFAULT_INDEX})"
@@ -820,7 +817,6 @@ Environment variables for database:
                         index_name=args.index,
                         limite=args.limite,
                         chunk_batch_size=args.chunk_batch_size,
-                        requests_per_minute=args.requests_per_minute,
                     )
                 else:
                     index_notice_chunks_from_s3(
@@ -828,7 +824,6 @@ Environment variables for database:
                         limite=args.limite,
                         since=args.since,
                         chunk_batch_size=args.chunk_batch_size,
-                        requests_per_minute=args.requests_per_minute,
                         save_embeddings=args.save_embeddings,
                         load_embeddings=args.load_embeddings,
                     )

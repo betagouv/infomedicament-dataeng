@@ -5,13 +5,13 @@ import hashlib
 import io
 import json
 import logging
-import time
 from collections.abc import Iterable, Iterator
 from datetime import date
 
 import openai
 from openai import OpenAI
 from opensearchpy import OpenSearch, helpers
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from ..config import OpenSearchConfig, S3Config, get_config
 from ..s3 import S3Client
@@ -26,7 +26,7 @@ DEFAULT_INDEX = "notice_chunks"
 _FLAT_HEADER_TYPES = {"AmmCorpsTexteGras", "AmmAnnexeTitre3"}
 
 # Top-level node types carrying no patient-relevant content
-_SKIP_TOP_TYPES = {"AmmAnnexeTitre", "DateNotif", "AmmNoticeTitre1"}
+_SKIP_TOP_TYPES = {"AmmAnnexeTitre", "DateNotif"}
 
 # Section anchors to skip entirely
 _SKIP_ANCHORS = {"Ann3bEmballage"}  # section 6: administrative / packaging info
@@ -134,14 +134,6 @@ def _make_chunk(
 
 
 def _iter_notice_chunks(record: dict) -> Iterator[dict]:
-    """Yield fine-grained chunks from a parsed notice record.
-
-    Each chunk is a logical block: a bold sub-header (AmmCorpsTexteGras /
-    AmmAnnexeTitre3) followed by its body paragraphs and bullet lists, or
-    an AmmAnnexeTitre2 sub-section with its children.
-
-    Sections 1 to 5 are indexed; section 6 (emballage / admin) is skipped.
-    """
     cis = str(record.get("source", {}).get("cis", ""))
 
     for section in record.get("content", []):
@@ -229,12 +221,17 @@ def _try_load_cache(s3_client: S3Client, cis: str, record: dict) -> list[tuple[d
             logger.info(f"Cache stale for CIS {cis}, re-embedding")
             return None
         current_chunks = {c["_id"]: c for c in _iter_notice_chunks(record)}
+        cache_lines = lines[1:]
+        if len(cache_lines) != len(current_chunks):
+            logger.info(
+                f"Cache chunk count mismatch for CIS {cis} ({len(cache_lines)} vs {len(current_chunks)}), re-embedding"
+            )
+            return None
         result = []
-        for line in lines[1:]:
+        for line in cache_lines:
             entry = json.loads(line)
             chunk = current_chunks.get(entry["_id"])
             if chunk is None:
-                # Should not happen when content_hash matched, but guard anyway
                 logger.warning(f"Cache chunk ID mismatch for CIS {cis}, re-embedding")
                 return None
             result.append((chunk, entry["embedding"]))
@@ -251,20 +248,15 @@ def _get_albert_client(config=None):
     return OpenAI(api_key=albert.api_key, base_url=albert.base_url), albert.model
 
 
+@retry(
+    retry=retry_if_exception_type((openai.RateLimitError, openai.APIStatusError)),
+    wait=wait_exponential(multiplier=1, min=1, max=16),
+    stop=stop_after_attempt(4),
+    reraise=True,
+)
 def _embed_texts(texts: list[str], client, model: str) -> list[list[float]]:
     response = client.embeddings.create(model=model, input=texts, encoding_format="float")
     return [e.embedding for e in response.data]
-
-
-def _embed_with_retry(texts: list[str], client, model: str, max_retries: int = 3) -> list[list[float]]:
-    for attempt in range(max_retries - 1):
-        try:
-            return _embed_texts(texts, client, model)
-        except (openai.RateLimitError, openai.APIStatusError) as e:
-            wait = 2**attempt
-            logger.warning(f"Albert API error ({e}), retrying in {wait}s...")
-            time.sleep(wait)
-    return _embed_texts(texts, client, model)  # last attempt: exceptions propagate
 
 
 def index_notice_chunks(
@@ -274,7 +266,6 @@ def index_notice_chunks(
     os_client: OpenSearch,
     index_name: str = DEFAULT_INDEX,
     chunk_batch_size: int = 64,  # AlbertAPI limit
-    requests_per_minute: int = 500,
     s3_client: S3Client | None = None,
     save_embeddings: bool = False,
     load_embeddings: bool = False,
@@ -284,12 +275,7 @@ def index_notice_chunks(
     Returns the total number of chunks successfully indexed.
     """
     create_or_update_index(os_client, index_name, INDEX_MAPPING)
-    min_interval = 60.0 / requests_per_minute
-    last_embed_call = 0.0
     total = 0
-
-    # Each entry: (chunk, cis, content_hash) — cis + hash needed for cache save
-    pending: list[tuple[dict, str, str]] = []
 
     def _bulk_index(pairs: list[tuple[dict, list[float]]]) -> int:
         actions = [
@@ -305,46 +291,45 @@ def index_notice_chunks(
             logger.warning(f"{failed} chunks failed to index")
         return success
 
-    def _flush() -> int:
-        nonlocal last_embed_call
-        if not pending:
-            return 0
-        chunks = [p[0] for p in pending]
-        elapsed = time.monotonic() - last_embed_call
-        if last_embed_call and elapsed < min_interval:
-            time.sleep(min_interval - elapsed)
-        embeddings = _embed_with_retry([c["embed_text"] for c in chunks], embed_client, embed_model)
-        last_embed_call = time.monotonic()
-
-        if save_embeddings and s3_client:
-            by_cis: dict[str, tuple[str, list[tuple[dict, list[float]]]]] = {}
-            for (chunk, cis, content_hash), emb in zip(pending, embeddings):
-                if cis not in by_cis:
-                    by_cis[cis] = (content_hash, [])
-                by_cis[cis][1].append((chunk, emb))
-            for cis, (content_hash, pairs) in by_cis.items():
+    if save_embeddings:
+        for record in records:
+            cis = str(record.get("source", {}).get("cis", ""))
+            if load_embeddings and s3_client:
+                cached = _try_load_cache(s3_client, cis, record)
+                if cached is not None:
+                    logger.info(f"Loaded {len(cached)} chunks from cache for CIS {cis}")
+                    total += _bulk_index(cached)
+                    continue
+            content_hash = _content_hash(record)
+            chunks = list(_iter_notice_chunks(record))
+            pairs: list[tuple[dict, list[float]]] = []
+            for i in range(0, len(chunks), chunk_batch_size):
+                batch = chunks[i : i + chunk_batch_size]
+                embeddings = _embed_texts([c["embed_text"] for c in batch], embed_client, embed_model)
+                pairs.extend(zip(batch, embeddings))
+            if s3_client and pairs:
                 _save_embedding_cache(s3_client, cis, content_hash, pairs)
+            total += _bulk_index(pairs)
+    else:
+        pending: list[dict] = []
+        for record in records:
+            cis = str(record.get("source", {}).get("cis", ""))
+            if load_embeddings and s3_client:
+                cached = _try_load_cache(s3_client, cis, record)
+                if cached is not None:
+                    logger.info(f"Loaded {len(cached)} chunks from cache for CIS {cis}")
+                    total += _bulk_index(cached)
+                    continue
+            for chunk in _iter_notice_chunks(record):
+                pending.append(chunk)
+                if len(pending) >= chunk_batch_size:
+                    embeddings = _embed_texts([c["embed_text"] for c in pending], embed_client, embed_model)
+                    total += _bulk_index(list(zip(pending, embeddings)))
+                    pending.clear()
+        if pending:
+            embeddings = _embed_texts([c["embed_text"] for c in pending], embed_client, embed_model)
+            total += _bulk_index(list(zip(pending, embeddings)))
 
-        count = _bulk_index(list(zip(chunks, embeddings)))
-        pending.clear()
-        return count
-
-    for record in records:
-        cis = str(record.get("source", {}).get("cis", ""))
-
-        if load_embeddings and s3_client:
-            cached = _try_load_cache(s3_client, cis, record)
-            if cached is not None:
-                total += _bulk_index(cached)
-                continue
-
-        content_hash = _content_hash(record)
-        for chunk in _iter_notice_chunks(record):
-            pending.append((chunk, cis, content_hash))
-            if len(pending) >= chunk_batch_size:
-                total += _flush()
-
-    total += _flush()
     return total
 
 
@@ -354,8 +339,7 @@ def index_from_local(
     limite: int | None = None,
     os_config: OpenSearchConfig | None = None,
     albert_config=None,
-    chunk_batch_size: int = 512,
-    requests_per_minute: int = 500,
+    chunk_batch_size: int = 64,
 ) -> int:
     """Index a local parsed notice JSONL file into OpenSearch via Albert API embeddings."""
     os_client = get_opensearch_client(os_config)
@@ -384,7 +368,6 @@ def index_from_local(
         os_client,
         index_name,
         chunk_batch_size=chunk_batch_size,
-        requests_per_minute=requests_per_minute,
     )
     logger.info(f"Indexed {total} chunks from {path} into '{index_name}'")
     return total
@@ -397,8 +380,7 @@ def index_from_s3(
     albert_config=None,
     s3_config: S3Config | None = None,
     since: str | None = None,
-    chunk_batch_size: int = 512,
-    requests_per_minute: int = 500,
+    chunk_batch_size: int = 64,
     save_embeddings: bool = False,
     load_embeddings: bool = False,
 ) -> int:
@@ -432,7 +414,6 @@ def index_from_s3(
         os_client,
         index_name,
         chunk_batch_size=chunk_batch_size,
-        requests_per_minute=requests_per_minute,
         s3_client=s3,
         save_embeddings=save_embeddings,
         load_embeddings=load_embeddings,
