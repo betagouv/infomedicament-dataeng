@@ -169,6 +169,43 @@ poetry run infomedicament-dataeng index-opensearch sections --doc-type notice --
 
 Re-indexing is idempotent — each document has a deterministic ID (`{cis}_{anchor}_{doc_type}`), so re-running overwrites existing documents without creating duplicates.
 
+#### Notice chunks index (semantic search)
+
+Index notice content as fine-grained chunks with vector embeddings for semantic (kNN) search. Each logical block of a notice (a sub-section, a bold-headed paragraph, a list of side effects…) becomes one document with a 1024-dimension embedding produced by the Albert API (bge-m3 model).
+
+Requires `ALBERT_API_KEY` — see [Configuration](#configuration).
+
+```bash
+poetry run infomedicament-dataeng index-opensearch notice-chunks (--input PATH | --s3) [options]
+```
+
+Options:
+- `--input PATH`: Local parsed notice JSONL file (mutually exclusive with `--s3`)
+- `--s3`: Read from S3 parsed notice files (mutually exclusive with `--input`)
+- `--save-embeddings`: Write per-notice embedding cache to S3 (avoids re-calling Albert on re-runs)
+- `--load-embeddings`: Load embeddings from S3 cache when available (skip Albert API on cache hit)
+- `--since YYYY-MM-DD`: S3 mode only — only index JSONL files dated on or after this date
+- `--chunk-batch-size N`: Chunks per Albert API call (default: 512, AlbertAPI hard limit: 64)
+- `--index`: OpenSearch index name (default: `notice_chunks`)
+- `--limite N`: Cap on records indexed (for testing)
+
+Examples:
+```bash
+# Development: index a local file
+poetry run infomedicament-dataeng index-opensearch notice-chunks \
+  --input parsed_notices.jsonl --chunk-batch-size 64
+
+# Production: embed from S3, cache results, then load from cache on subsequent runs
+poetry run infomedicament-dataeng index-opensearch notice-chunks \
+  --s3 --save-embeddings --load-embeddings --chunk-batch-size 64
+
+# Delta: only newly parsed notices
+poetry run infomedicament-dataeng index-opensearch notice-chunks \
+  --s3 --save-embeddings --load-embeddings --since 2026-04-01 --chunk-batch-size 64
+```
+
+The embedding cache is stored on S3 at `exports/parsed/embeddings/notices/{cis}.jsonl.gz` and is invalidated automatically when the notice source content changes (SHA1 hash check).
+
 ### SQL to CSV Conversion
 
 Convert SQL INSERT statements (T-SQL, MySQL, PostgreSQL) to CSV files.
@@ -347,6 +384,10 @@ Two configuration formats are supported:
 
 - `SCALINGO_OPENSEARCH_URL` or `OPENSEARCH_URL`: Full connection URL including credentials (e.g. `http://user:pass@host:port`). Scalingo provides this automatically when an OpenSearch addon is attached.
 - `OPENSEARCH_HOST`: Fallback for local development (default: `http://localhost:9200`)
+
+### Albert API (embeddings)
+
+- `ALBERT_API_KEY`: API key for the [Albert API](https://albert.api.etalab.gouv.fr) — required for `index-opensearch notice-chunks`
 
 ### Application
 

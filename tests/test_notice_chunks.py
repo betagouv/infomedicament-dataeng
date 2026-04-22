@@ -48,7 +48,7 @@ class TestIterNoticeChunks:
     def test_skips_date_notif(self):
         assert list(_iter_notice_chunks(_record("1", [{"type": "DateNotif", "content": "06/03/2013"}]))) == []
 
-    def test_skips_amm_notice_titre1(self):
+    def test_amm_notice_titre1_without_children_yields_nothing(self):
         assert (
             list(
                 _iter_notice_chunks(
@@ -60,6 +60,23 @@ class TestIterNoticeChunks:
             )
             == []
         )
+
+    def test_amm_notice_titre1_with_children_yields_chunks(self):
+        record = _record(
+            "1",
+            [
+                {
+                    "type": "AmmNoticeTitre1",
+                    "content": "Contre-indications",
+                    "anchor": "Ann3bContreIndic",
+                    "children": [{"type": "AmmCorpsTexte", "content": "Ne pas utiliser en cas d'allergie."}],
+                }
+            ],
+        )
+        chunks = list(_iter_notice_chunks(record))
+        assert len(chunks) == 1
+        assert chunks[0]["section_title"] == "Contre-indications"
+        assert "allergie" in chunks[0]["text"]
 
     # anchor skips
 
