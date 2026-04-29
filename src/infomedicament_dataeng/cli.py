@@ -11,6 +11,7 @@ from datetime import date, datetime
 from pathlib import Path
 
 import chardet
+from openai import OpenAI
 from tqdm import tqdm
 
 from .config import get_config
@@ -26,6 +27,7 @@ from .opensearch.sections import index_from_local, index_from_s3
 from .opensearch.specialites import DEFAULT_INDEX as SPECIALITES_DEFAULT_INDEX
 from .opensearch.specialites import index_specialites
 from .parsing import html_vers_json
+from .pediatric.llm import classify_with_llm
 from .s3 import make_s3_client
 
 logger = logging.getLogger(__name__)
@@ -323,6 +325,7 @@ def run_pediatric_classification(
     output_path: str,
     debug: bool = False,
     batch_size: int = 500,
+    classifier=None,  # callable(rcp_json, atc_code) -> PediatricClassification; defaults to keyword classify()
 ) -> None:
     """Run pediatric classification on parsed RCPs and optionally evaluate."""
     from .db import get_cis_atc_mapping
@@ -402,7 +405,8 @@ def run_pediatric_classification(
         with open(output_path, "a", encoding="utf-8", newline="") as f:
             writer = csv.writer(f)
             for cis, rcp_json in rcp_by_cis.items():
-                pred = classify(rcp_json, atc_code=atc_mapping.get(cis, ""))
+                _classify = classifier or classify
+                pred = _classify(rcp_json, atc_mapping.get(cis, ""))
                 seen_cis.add(cis)
                 if ground_truth:
                     all_predictions.append(pred)
@@ -640,6 +644,9 @@ Environment variables for database:
     ped_parser.add_argument("--output", "-o", default="data/predictions.csv", help="Output predictions CSV")
     ped_parser.add_argument("--batch-size", type=int, default=500, help="RCPs per batch (default: 500)")
     ped_parser.add_argument("--debug", action="store_true", help="Write debug_sections.jsonl with raw section texts")
+    ped_parser.add_argument(
+        "--llm", action="store_true", help="Use Albert LLM for classification instead of keyword rules"
+    )
 
     # Index into OpenSearch (subcommand group)
     os_parser = subparsers.add_parser("index-opensearch", help="Index data into OpenSearch")
@@ -756,6 +763,17 @@ Environment variables for database:
 
     elif args.command == "classify-pediatric":
         try:
+            classifier = None
+            if args.llm:
+                albert = get_config().albert
+                _client = OpenAI(api_key=albert.api_key, base_url=albert.base_url)
+                _model = albert.completion_model
+
+                def classifier(rcp, atc, client=_client, model=_model):
+                    return classify_with_llm(rcp, atc, client, model)
+
+                logger.info(f"LLM classifier enabled: {_model}")
+
             if args.local_rcp:
                 with open(args.local_rcp, encoding="utf-8") as f:
                     run_pediatric_classification(
@@ -764,6 +782,7 @@ Environment variables for database:
                         args.output,
                         debug=args.debug,
                         batch_size=args.batch_size,
+                        classifier=classifier,
                     )
             else:
                 s3_client = make_s3_client()
@@ -781,6 +800,7 @@ Environment variables for database:
                     args.output,
                     debug=args.debug,
                     batch_size=args.batch_size,
+                    classifier=classifier,
                 )
         except Exception as e:
             logger.exception(f"Error: {e}")

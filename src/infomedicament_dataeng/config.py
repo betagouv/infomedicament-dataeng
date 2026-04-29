@@ -142,6 +142,7 @@ class AlbertConfig:
     api_key: str
     base_url: str
     model: str
+    completion_model: str
 
     @classmethod
     def from_env(cls) -> "AlbertConfig":
@@ -149,6 +150,7 @@ class AlbertConfig:
             api_key=os.environ.get("ALBERT_API_KEY", ""),
             base_url=os.environ.get("ALBERT_API_BASE_URL", "https://albert.api.etalab.gouv.fr/v1"),
             model=os.environ.get("ALBERT_EMBEDDING_MODEL", "BAAI/bge-m3"),
+            completion_model=os.environ.get("ALBERT_COMPLETION_MODEL", "mistralai/Mistral-Small-3.2-24B-Instruct-2506"),
         )
 
     def is_configured(self) -> bool:
