@@ -36,6 +36,8 @@ LOAD_ORDER = [
     "classe_groupe_substance",
     "substance_groupe_substance",
     "interaction",
+    "groupe_generique",
+    "specialite_groupe_generique",
     "composant",
     "recipient",
     "dispositif",
