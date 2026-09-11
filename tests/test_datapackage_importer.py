@@ -29,6 +29,8 @@ def test_load_order_covers_current_ansm_package_resources():
         "substance_groupe_substance",
         "classe_groupe_substance",
         "interaction",
+        "groupe_generique",
+        "specialite_groupe_generique",
         "document",
     }
 
@@ -45,6 +47,9 @@ def test_load_order_places_new_resources_after_their_parents():
         ("specialite_delivrance", "specialite"),
         ("specialite_delivrance", "delivrance"),
         ("specialite_evenement", "specialite"),
+        ("groupe_generique", "atc"),
+        ("specialite_groupe_generique", "groupe_generique"),
+        ("specialite_groupe_generique", "specialite"),
     ]
 
     for child, parent in dependencies:
