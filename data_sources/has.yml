@@ -1,7 +1,7 @@
 datasets:
   asmr:
     datagouv_dataset_id: "f6122601-81bc-4b31-a6f9-df72b7a04119"
-    postgresql_table: asmr
+    postgresql_table: has_asmr
     source:
       type: csv
       delimiter: ";"
@@ -29,7 +29,7 @@ datasets:
 
   smr:
     datagouv_dataset_id: "4da2d811-1c29-4f73-9805-83ae710be6d7"
-    postgresql_table: smr
+    postgresql_table: has_smr
     source:
       type: csv
       delimiter: ";"
@@ -57,7 +57,7 @@ datasets:
 
   url_has:
     datagouv_dataset_id: "f67407e1-2dae-4edf-9d0f-b280d41b731a"
-    postgresql_table: url_has
+    postgresql_table: has_url_has
     source:
       type: csv
       delimiter: ";"
