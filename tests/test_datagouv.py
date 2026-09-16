@@ -13,6 +13,7 @@ from infomedicament_dataeng.datagouv import (
     import_dataset,
     load_datasets,
 )
+from infomedicament_dataeng.datapackage_importer import LOAD_ORDER
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
@@ -56,6 +57,16 @@ class TestLoadDatasets:
         assert ds.source.encoding == "utf-8"
         assert [c.name for c in ds.columns] == ["col_a", "col_b", "col_c"]
         assert all(c.type == "str" for c in ds.columns)
+        assert ds.base_url == "https://www.data.gouv.fr/api/1/datasets/r/"
+
+    def test_parses_base_url_override(self, tmp_path: Path):
+        config = (FIXTURES_DIR / "test_datagouv.yml").read_text()
+        config_file = tmp_path / "demo.yml"
+        config_file.write_text(f"base_url: https://demo.data.gouv.fr/api/1/datasets/r\n{config}", encoding="utf-8")
+
+        ds = load_datasets(config_file)["test_dataset"]
+
+        assert ds.base_url == "https://demo.data.gouv.fr/api/1/datasets/r"
 
     def test_raises_on_unknown_source_type(self, tmp_path: Path):
         bad_yaml = (FIXTURES_DIR / "test_datagouv.yml").read_text().replace("type: csv", "type: json")
@@ -63,6 +74,13 @@ class TestLoadDatasets:
         config_file.write_text(bad_yaml, encoding="utf-8")
         with pytest.raises(ValueError, match="Unsupported source type"):
             load_datasets(config_file)
+
+    def test_ansm_config_covers_all_package_resources(self):
+        datasets = load_datasets(Path("data_sources/ansm.yml"))
+
+        assert list(datasets) == LOAD_ORDER
+        assert all(dataset.postgresql_table == f"ansm_{name}" for name, dataset in datasets.items())
+        assert all(dataset.base_url == "https://demo.data.gouv.fr/api/1/datasets/r/" for dataset in datasets.values())
 
 
 # ---------------------------------------------------------------------------
@@ -115,6 +133,12 @@ class TestFetchCsv:
             fetch_csv(sample_dataset)
         mock_urlopen.assert_called_once_with("https://www.data.gouv.fr/api/1/datasets/r/abc-123")
 
+    def test_uses_base_url_override(self, sample_dataset: DataGouvDataset):
+        sample_dataset.base_url = "https://demo.data.gouv.fr/api/1/datasets/r/"
+        with self._mock_urlopen(SAMPLE_CSV) as mock_urlopen:
+            fetch_csv(sample_dataset)
+        mock_urlopen.assert_called_once_with("https://demo.data.gouv.fr/api/1/datasets/r/abc-123")
+
 
 # ---------------------------------------------------------------------------
 # import_dataset
@@ -156,6 +180,21 @@ class TestImportDataset:
         assert "test_table" in copy_sql
         assert "col_a, col_b, col_c" in copy_sql
         assert buf.getvalue() == '"val1","val2","val3"\n"val4","val5","val6"\n'
+
+    def test_serializes_typed_nulls_and_arrays(self, sample_dataset: DataGouvDataset):
+        sample_dataset.columns = [
+            ColumnDef(name="col_a", type="int"),
+            ColumnDef(name="col_b", type="array"),
+            ColumnDef(name="col_c", type="str"),
+        ]
+        rows = [["", '["one", "two"]', ""]]
+        mock_engine_patch, mock_engine, mock_conn = self._mock_engine()
+        with mock_engine_patch, patch("infomedicament_dataeng.datagouv.importer.fetch_csv", return_value=rows):
+            import_dataset(sample_dataset)
+
+        cur = mock_conn.connection.dbapi_connection.cursor.return_value.__enter__.return_value
+        _, buf = cur.copy_expert.call_args.args
+        assert buf.getvalue() == ',"{""one"",""two""}",""\n'
 
     def test_returns_row_count(self, sample_dataset: DataGouvDataset):
         rows = [["a", "b", "c"]] * 42

@@ -2,6 +2,7 @@
 
 import csv
 import io
+import json
 import logging
 import urllib.request
 from dataclasses import dataclass
@@ -16,10 +17,6 @@ from ..db import get_postgres_engine
 logger = logging.getLogger(__name__)
 
 BASE_URL = "https://www.data.gouv.fr/api/1/datasets/r/"
-
-# Map YAML type strings to Python SQL types (extensible for future types)
-_SQL_TYPES = {"str": "text"}
-
 
 @dataclass
 class ColumnDef:
@@ -41,6 +38,7 @@ class DataGouvDataset:
     postgresql_table: str
     source: CsvSource
     columns: list[ColumnDef]
+    base_url: str = BASE_URL
 
 
 def load_datasets(config_path: Path) -> dict[str, DataGouvDataset]:
@@ -48,6 +46,7 @@ def load_datasets(config_path: Path) -> dict[str, DataGouvDataset]:
     with config_path.open(encoding="utf-8") as f:
         raw = yaml.safe_load(f)
 
+    base_url = raw.get("base_url", BASE_URL)
     datasets = {}
     for name, d in raw["datasets"].items():
         src = d["source"]
@@ -63,6 +62,7 @@ def load_datasets(config_path: Path) -> dict[str, DataGouvDataset]:
                 has_header=src.get("has_header", True),
             ),
             columns=[ColumnDef(name=c["name"], type=c["type"]) for c in d["columns"]],
+            base_url=base_url,
         )
     return datasets
 
@@ -72,12 +72,29 @@ def fetch_csv(dataset: DataGouvDataset) -> list[list[str]]:
 
     The header row is skipped unless ``source.has_header`` is False.
     """
-    url = BASE_URL + dataset.datagouv_dataset_id
+    url = f"{dataset.base_url.rstrip('/')}/{dataset.datagouv_dataset_id}"
     with urllib.request.urlopen(url) as response:
         content = response.read().decode(dataset.source.encoding)
     reader = csv.reader(io.StringIO(content), delimiter=dataset.source.delimiter, quotechar=dataset.source.quotechar)
     rows = list(reader)
     return rows[1:] if dataset.source.has_header else rows
+
+
+def _copy_value(value: str, column_type: str) -> str | None:
+    if column_type == "str":
+        return value
+    if value == "":
+        return None
+    if column_type == "array":
+        items = json.loads(value)
+        return "{" + ",".join('"' + str(item).replace("\\", "\\\\").replace('"', '\\"') + '"' for item in items) + "}"
+    return value
+
+
+def _csv_field(value: str | None) -> str:
+    if value is None:
+        return ""
+    return '"' + value.replace('"', '""') + '"'
 
 
 def import_dataset(dataset: DataGouvDataset, config: PostgresConfig | None = None) -> int:
@@ -101,12 +118,13 @@ def import_dataset(dataset: DataGouvDataset, config: PostgresConfig | None = Non
 
     col_names = ", ".join(c.name for c in dataset.columns)
 
-    # Serialize rows to CSV with every field quoted, so empty fields round-trip as
-    # empty strings (not NULL) and delimiters/quotes/newlines are escaped. All cells
-    # are already strings (from csv.reader), so no type/null handling is needed.
+    # Text fields preserve empty strings. Empty typed fields become SQL NULL, and
+    # JSON arrays from the published CSV are converted to PostgreSQL array syntax.
     buf = io.StringIO()
-    writer = csv.writer(buf, quoting=csv.QUOTE_ALL, lineterminator="\n")
-    writer.writerows(rows)
+    for row in rows:
+        values = [_copy_value(value, column.type) for value, column in zip(row, dataset.columns, strict=True)]
+        buf.write(",".join(_csv_field(value) for value in values))
+        buf.write("\n")
     buf.seek(0)
 
     engine = get_postgres_engine(config)
