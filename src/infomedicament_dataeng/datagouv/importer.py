@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 
 BASE_URL = "https://www.data.gouv.fr/api/1/datasets/r/"
 
+
 @dataclass
 class ColumnDef:
     name: str
