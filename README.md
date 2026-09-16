@@ -449,6 +449,9 @@ uv run infomedicament-dataeng import-datagouv --config data_sources/has.yml
 
 # Import only the smr table
 uv run infomedicament-dataeng import-datagouv --config data_sources/has.yml --dataset smr
+
+# Import all ANSM tables from the data.gouv.fr demo environment
+uv run infomedicament-dataeng import-datagouv --config data_sources/ansm.yml
 ```
 
 #### Adding a new dataset
@@ -456,6 +459,9 @@ uv run infomedicament-dataeng import-datagouv --config data_sources/has.yml --da
 Dataset configuration lives in YAML files under `data_sources/`. Each entry maps a data.gouv.fr resource to a PostgreSQL table:
 
 ```yaml
+# Optional file-wide override; defaults to https://www.data.gouv.fr/api/1/datasets/r/
+base_url: https://demo.data.gouv.fr/api/1/datasets/r/
+
 datasets:
   my_dataset:
     datagouv_dataset_id: "<resource UUID from data.gouv.fr>"
@@ -471,6 +477,10 @@ datasets:
       - name: col_two
         type: str
 ```
+
+`base_url` applies to every dataset in the file. Remove it when the resource is
+moved to the production data.gouv.fr site; update `datagouv_dataset_id` as well
+if the resource UUID changes.
 
 The table must be created first via a Kysely migration in the [`infomedicament`](https://github.com/betagouv/infomed) NextJS project.
 

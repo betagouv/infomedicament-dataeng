@@ -1,0 +1,301 @@
+base_url: https://demo.data.gouv.fr/api/1/datasets/r/
+
+datasets:
+  specialite:
+    datagouv_dataset_id: "a2c9e0d7-14ae-4a6c-9081-c9a37ab15398"
+    postgresql_table: ansm_specialite
+    source: &csv
+      type: csv
+      delimiter: ","
+      encoding: utf-8
+    columns:
+      - {name: cis, type: str}
+      - {name: denomination, type: str}
+      - {name: generique, type: int}
+      - {name: procedure, type: str}
+      - {name: date_amm, type: date}
+      - {name: statut_amm, type: str}
+      - {name: date_modification, type: datetime}
+      - {name: disponibilite, type: str}
+
+  atc:
+    datagouv_dataset_id: "4d1798ee-20fb-4c8a-9043-e454a6ddafdf"
+    postgresql_table: ansm_atc
+    source: *csv
+    columns:
+      - {name: code, type: int}
+      - {name: code_parent, type: int}
+      - {name: libelle_abr, type: str}
+      - {name: libelle_court, type: str}
+      - {name: libelle_long, type: str}
+      - {name: libelle_anglais, type: str}
+
+  classe_clinique:
+    datagouv_dataset_id: "02f362c6-9006-4178-b294-497c6c050c9f"
+    postgresql_table: ansm_classe_clinique
+    source: *csv
+    columns:
+      - {name: code, type: int}
+      - {name: libelle_court, type: str}
+      - {name: libelle_long, type: str}
+
+  pathologie:
+    datagouv_dataset_id: "a340977c-6380-4829-8bab-8e99a630459d"
+    postgresql_table: ansm_pathologie
+    source: *csv
+    columns:
+      - {name: code, type: int}
+      - {name: code_parent, type: int}
+      - {name: nom, type: str}
+      - {name: information, type: str}
+
+  delivrance:
+    datagouv_dataset_id: "e1e59c0b-8e53-45e5-856f-f136ad2d0ae5"
+    postgresql_table: ansm_delivrance
+    source: *csv
+    columns:
+      - {name: code, type: int}
+      - {name: libelle_court, type: str}
+      - {name: libelle_long, type: str}
+
+  groupe_substance:
+    datagouv_dataset_id: "d460a051-a875-45f1-b911-b5ac31397182"
+    postgresql_table: ansm_groupe_substance
+    source: *csv
+    columns:
+      - {name: code_groupe, type: int}
+      - {name: code_groupe_parent, type: int}
+      - {name: nom, type: str}
+      - {name: date_modification, type: datetime}
+
+  classe_interaction:
+    datagouv_dataset_id: "4f2fd55f-70ab-4cab-ad80-5fc271204e78"
+    postgresql_table: ansm_classe_interaction
+    source: *csv
+    columns:
+      - {name: code_classe, type: int}
+      - {name: nom, type: str}
+      - {name: description, type: str}
+      - {name: date_modification, type: datetime}
+
+  substance_nom:
+    datagouv_dataset_id: "3b8167cf-8f4e-4cb4-a6cc-59a027862f1d"
+    postgresql_table: ansm_substance_nom
+    source: *csv
+    columns:
+      - {name: code_substance, type: str}
+      - {name: code_nom, type: str}
+      - {name: nom, type: str}
+      - {name: type, type: str}
+
+  presentation:
+    datagouv_dataset_id: "68a832f6-9610-4c31-bd74-abdbe3d53ff4"
+    postgresql_table: ansm_presentation
+    source: *csv
+    columns:
+      - {name: cis, type: str}
+      - {name: cip, type: str}
+      - {name: cip7, type: str}
+      - {name: denomination, type: str}
+      - {name: date_modification, type: datetime}
+      - {name: statut_commercialisation, type: str}
+      - {name: date_commercialisation, type: date}
+      - {name: date_arret_commercialisation, type: date}
+      - {name: statut, type: str}
+
+  presentation_evenement:
+    datagouv_dataset_id: "6f7aba25-1976-4047-b10e-e55e7ee75d1b"
+    postgresql_table: ansm_presentation_evenement
+    source: *csv
+    columns:
+      - {name: cip, type: str}
+      - {name: code_evenement, type: int}
+      - {name: num_evenement, type: int}
+      - {name: evenement, type: str}
+      - {name: date_evenement, type: date}
+      - {name: date_echeance, type: date}
+      - {name: commentaire, type: str}
+      - {name: date_modification, type: datetime}
+
+  element:
+    datagouv_dataset_id: "209d170d-db63-4f24-9581-28698482f90d"
+    postgresql_table: ansm_element
+    source: *csv
+    columns:
+      - {name: cis, type: str}
+      - {name: numero_element, type: int}
+      - {name: denomination, type: str}
+      - {name: ordre, type: int}
+
+  specialite_atc:
+    datagouv_dataset_id: "b7d0ebd4-25cd-4378-9189-1fa1a5a5f4a8"
+    postgresql_table: ansm_specialite_atc
+    source: *csv
+    columns:
+      - {name: cis, type: str}
+      - {name: code_atc, type: int}
+
+  specialite_classe_clinique:
+    datagouv_dataset_id: "8720e167-d3f8-4d97-928d-dc740b7b02b4"
+    postgresql_table: ansm_specialite_classe_clinique
+    source: *csv
+    columns:
+      - {name: cis, type: str}
+      - {name: code_classe_clinique, type: int}
+
+  classe_clinique_pathologie:
+    datagouv_dataset_id: "11546dfa-623c-4b20-b244-bb5317760c2e"
+    postgresql_table: ansm_classe_clinique_pathologie
+    source: *csv
+    columns:
+      - {name: code_classe_clinique, type: int}
+      - {name: code_pathologie, type: int}
+
+  specialite_delivrance:
+    datagouv_dataset_id: "b1148657-4f67-4d3c-bf5b-15ec3c6fb390"
+    postgresql_table: ansm_specialite_delivrance
+    source: *csv
+    columns:
+      - {name: cis, type: str}
+      - {name: code_delivrance, type: int}
+
+  specialite_evenement:
+    datagouv_dataset_id: "1feb0fe5-8a09-4bf4-9d53-db15d686ff39"
+    postgresql_table: ansm_specialite_evenement
+    source: *csv
+    columns:
+      - {name: cis, type: str}
+      - {name: code_evenement, type: int}
+      - {name: num_evenement, type: int}
+      - {name: evenement, type: str}
+      - {name: date_evenement, type: date}
+      - {name: date_echeance, type: date}
+      - {name: commentaire, type: str}
+      - {name: date_modification, type: datetime}
+
+  classe_groupe_substance:
+    datagouv_dataset_id: "50dca768-2ff0-43aa-876d-9c5ce251c54a"
+    postgresql_table: ansm_classe_groupe_substance
+    source: *csv
+    columns:
+      - {name: code_classe, type: int}
+      - {name: code_groupe, type: int}
+
+  substance_groupe_substance:
+    datagouv_dataset_id: "39ed0e6e-d523-4fb6-832c-6b5609fd8ae1"
+    postgresql_table: ansm_substance_groupe_substance
+    source: *csv
+    columns:
+      - {name: code_groupe, type: int}
+      - {name: code_substance, type: str}
+      - {name: date_modification, type: datetime}
+
+  interaction:
+    datagouv_dataset_id: "c2049ad1-3a3d-4d66-a13f-f0128151687a"
+    postgresql_table: ansm_interaction
+    source: *csv
+    columns:
+      - {name: code_groupe_1, type: int}
+      - {name: code_groupe_2, type: int}
+      - {name: code_classe_1, type: int}
+      - {name: code_classe_2, type: int}
+      - {name: niveau, type: str}
+      - {name: risque, type: str}
+      - {name: conduite, type: str}
+      - {name: commentaire, type: str}
+      - {name: date_modification, type: datetime}
+
+  groupe_generique:
+    datagouv_dataset_id: "33481bee-75de-46e7-9ad1-0174d4cc9b47"
+    postgresql_table: ansm_groupe_generique
+    source: *csv
+    columns:
+      - {name: code_groupe, type: int}
+      - {name: libelle, type: str}
+      - {name: code_atc, type: int}
+      - {name: date_modification, type: datetime}
+      - {name: commentaire, type: str}
+
+  specialite_groupe_generique:
+    datagouv_dataset_id: "97ea4d4c-4e2f-456a-9a3d-f8fabc14927c"
+    postgresql_table: ansm_specialite_groupe_generique
+    source: *csv
+    columns:
+      - {name: code_groupe, type: int}
+      - {name: cis, type: str}
+      - {name: role, type: str}
+      - {name: rang, type: int}
+
+  composant:
+    datagouv_dataset_id: "6efdfbce-f474-40aa-96d3-8b79cfe85348"
+    postgresql_table: ansm_composant
+    source: *csv
+    columns:
+      - {name: cis, type: str}
+      - {name: numero_element, type: int}
+      - {name: numero_composant, type: int}
+      - {name: code_substance, type: str}
+      - {name: substance, type: str}
+      - {name: nature, type: str}
+      - {name: dosage, type: str}
+      - {name: ordre, type: int}
+
+  recipient:
+    datagouv_dataset_id: "8dd0372a-d142-4a3d-a254-3e485e73e425"
+    postgresql_table: ansm_recipient
+    source: *csv
+    columns:
+      - {name: cip, type: str}
+      - {name: numero_element, type: int}
+      - {name: numero_recipient, type: int}
+      - {name: nature_recipient, type: str}
+      - {name: nombre, type: int}
+      - {name: quantite_contenance, type: number}
+      - {name: code_unite_contenance, type: str}
+      - {name: unite_contenance, type: str}
+
+  dispositif:
+    datagouv_dataset_id: "3bf05239-879d-4055-8f38-397069470d3a"
+    postgresql_table: ansm_dispositif
+    source: *csv
+    columns:
+      - {name: cip, type: str}
+      - {name: numero_dispositif, type: int}
+      - {name: code_nature_dispositif, type: str}
+      - {name: nature_dispositif, type: str}
+
+  document:
+    datagouv_dataset_id: "989e4524-b7e5-44f3-bfff-0e62c0ac2199"
+    postgresql_table: ansm_document
+    source: *csv
+    columns:
+      - {name: cis, type: str}
+      - {name: type, type: str}
+      - {name: date_modification, type: datetime}
+      - {name: date_export, type: datetime}
+      - {name: url, type: str}
+      - {name: sha256, type: str}
+      - {name: images, type: array}
+
+  caracteristique:
+    datagouv_dataset_id: "a1f7ee85-b4da-44a4-bacc-7542a26f38fe"
+    postgresql_table: ansm_caracteristique
+    source: *csv
+    columns:
+      - {name: cip, type: str}
+      - {name: numero_recipient, type: int}
+      - {name: code_caracteristique, type: int}
+      - {name: ordre, type: int}
+      - {name: libelle, type: str}
+
+  specialite_titulaire:
+    datagouv_dataset_id: "32f9dce5-02a0-4678-8bae-5e6bba10ee48"
+    postgresql_table: ansm_specialite_titulaire
+    source: *csv
+    columns:
+      - {name: cis, type: str}
+      - {name: code_titulaire, type: str}
+      - {name: raison_sociale, type: str}
+      - {name: raison_sociale_longue, type: str}
+      - {name: pays, type: str}
+      - {name: date_debut, type: date}
