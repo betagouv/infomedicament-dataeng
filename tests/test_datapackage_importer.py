@@ -32,6 +32,8 @@ def test_load_order_covers_current_ansm_package_resources():
         "groupe_generique",
         "specialite_groupe_generique",
         "document",
+        "excipient_effet_notoire",
+        "specialite_excipient_effet_notoire",
     }
 
     assert len(LOAD_ORDER) == len(set(LOAD_ORDER))
@@ -50,6 +52,8 @@ def test_load_order_places_new_resources_after_their_parents():
         ("groupe_generique", "atc"),
         ("specialite_groupe_generique", "groupe_generique"),
         ("specialite_groupe_generique", "specialite"),
+        ("specialite_excipient_effet_notoire", "excipient_effet_notoire"),
+        ("specialite_excipient_effet_notoire", "specialite"),
     ]
 
     for child, parent in dependencies:

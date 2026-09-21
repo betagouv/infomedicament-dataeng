@@ -16,7 +16,9 @@ datasets:
       - {name: date_amm, type: date}
       - {name: statut_amm, type: str}
       - {name: date_modification, type: datetime}
+      - {name: code_ema, type: str}
       - {name: disponibilite, type: str}
+      - {name: een, type: str}
 
   atc:
     datagouv_dataset_id: "4d1798ee-20fb-4c8a-9043-e454a6ddafdf"
@@ -299,3 +301,19 @@ datasets:
       - {name: raison_sociale_longue, type: str}
       - {name: pays, type: str}
       - {name: date_debut, type: date}
+
+  excipient_effet_notoire:
+    datagouv_dataset_id: "521ead02-63a8-4190-9e72-85e2dc06bd47"
+    postgresql_table: ansm_excipient_effet_notoire
+    source: *csv
+    columns:
+      - {name: code, type: int}
+      - {name: libelle, type: str}
+
+  specialite_excipient_effet_notoire:
+    datagouv_dataset_id: "227c388f-cbfc-48f3-9eb1-9dc3dae1c8d9"
+    postgresql_table: ansm_specialite_excipient_effet_notoire
+    source: *csv
+    columns:
+      - {name: cis, type: str}
+      - {name: code_excipient, type: int}

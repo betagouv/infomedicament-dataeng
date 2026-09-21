@@ -44,6 +44,8 @@ LOAD_ORDER = [
     "document",
     "caracteristique",
     "specialite_titulaire",
+    "excipient_effet_notoire",
+    "specialite_excipient_effet_notoire",
 ]
 
 TABLE_PREFIX = "ansm_"
