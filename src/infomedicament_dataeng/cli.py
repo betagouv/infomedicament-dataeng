@@ -14,6 +14,7 @@ from pathlib import Path
 import chardet
 from tqdm import tqdm
 
+from .bdpm import import_ceps_prices
 from .config import get_config
 from .convert import sql_to_csv
 from .datagouv import import_dataset, load_datasets
@@ -1162,6 +1163,11 @@ Environment variables for database:
     )
     datagouv_parser.add_argument("--dataset", help="Name of a specific dataset to import (default: all)")
 
+    subparsers.add_parser(
+        "import-ceps-prices",
+        help="Replace ceps_price with presentation prices from the public medicines database",
+    )
+
     # Import ANSM datapackage
     datapackage_parser = subparsers.add_parser(
         "import-datapackage", help="Import the ANSM frictionless datapackage into PostgreSQL"
@@ -1379,6 +1385,13 @@ Environment variables for database:
     elif args.command == "import-datagouv":
         try:
             run_import_datagouv(args.config, dataset_name=args.dataset)
+        except Exception as e:
+            logger.exception(f"Error: {e}")
+            raise SystemExit(1)
+
+    elif args.command == "import-ceps-prices":
+        try:
+            import_ceps_prices()
         except Exception as e:
             logger.exception(f"Error: {e}")
             raise SystemExit(1)
