@@ -14,7 +14,7 @@ from pathlib import Path
 import chardet
 from tqdm import tqdm
 
-from .bdpm import import_ceps_prices
+from .bdpm import import_ceps_prices, import_cnam_agrements
 from .config import get_config
 from .convert import sql_to_csv
 from .datagouv import import_dataset, load_datasets
@@ -1167,6 +1167,10 @@ Environment variables for database:
         "import-ceps-prices",
         help="Replace ceps_price with presentation prices from the public medicines database",
     )
+    subparsers.add_parser(
+        "import-cnam-agrement-collectivite",
+        help="Replace cnam_agrement_collectivite with presentation approvals from the public medicines database",
+    )
 
     # Import ANSM datapackage
     datapackage_parser = subparsers.add_parser(
@@ -1392,6 +1396,13 @@ Environment variables for database:
     elif args.command == "import-ceps-prices":
         try:
             import_ceps_prices()
+        except Exception as e:
+            logger.exception(f"Error: {e}")
+            raise SystemExit(1)
+
+    elif args.command == "import-cnam-agrement-collectivite":
+        try:
+            import_cnam_agrements()
         except Exception as e:
             logger.exception(f"Error: {e}")
             raise SystemExit(1)

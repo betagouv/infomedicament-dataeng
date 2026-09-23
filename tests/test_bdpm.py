@@ -4,7 +4,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from infomedicament_dataeng.bdpm import fetch_ceps_prices, import_ceps_prices
+from infomedicament_dataeng.bdpm import (
+    fetch_ceps_prices,
+    fetch_cnam_agrements,
+    import_ceps_prices,
+    import_cnam_agrements,
+)
 
 
 def _source_row(
@@ -92,6 +97,30 @@ def test_refuses_download_without_any_prices():
         fetch_ceps_prices()
 
 
+def test_fetches_cnam_agrements_as_nullable_booleans():
+    content = (
+        _source_row("3400949497294").replace("\toui\t65%", "\toui\t65%")
+        + _source_row("3400930301043").replace("\toui\t65%", "\tnon\t65%")
+        + _source_row("3400930280300").replace("\toui\t65%", "\tinconnu\t65%")
+    )
+
+    with _mock_download(content):
+        rows = fetch_cnam_agrements()
+
+    assert rows == [
+        ("3400949497294", True),
+        ("3400930301043", False),
+        ("3400930280300", None),
+    ]
+
+
+def test_rejects_unknown_cnam_agrement_value():
+    content = _source_row("3400949497294").replace("\toui\t65%", "\tpeut-être\t65%")
+
+    with _mock_download(content), pytest.raises(ValueError, match="Invalid agrément aux collectivités"):
+        fetch_cnam_agrements()
+
+
 def test_truncates_and_copies_prices_in_one_transaction():
     mock_conn = MagicMock()
     mock_engine = MagicMock()
@@ -117,3 +146,24 @@ def test_truncates_and_copies_prices_in_one_transaction():
         "dispensing_fee_cents)" in copy_sql
     )
     assert buf.getvalue() == "3400949497294,{65},2434,2536,102\n3400930280300,{65},899373,102,\n"
+
+
+def test_truncates_and_copies_cnam_agrements_in_one_transaction():
+    mock_conn = MagicMock()
+    mock_engine = MagicMock()
+    mock_engine.begin.return_value.__enter__.return_value = mock_conn
+    mock_engine.begin.return_value.__exit__.return_value = False
+    rows = [("3400949497294", True), ("3400930301043", False), ("3400930280300", None)]
+
+    with (
+        patch("infomedicament_dataeng.bdpm.fetch_cnam_agrements", return_value=rows),
+        patch("infomedicament_dataeng.bdpm.get_postgres_engine", return_value=mock_engine),
+    ):
+        count = import_cnam_agrements()
+
+    assert count == 3
+    assert "TRUNCATE TABLE cnam_agrement_collectivite" in str(mock_conn.execute.call_args.args[0])
+    cursor = mock_conn.connection.dbapi_connection.cursor.return_value.__enter__.return_value
+    copy_sql, buf = cursor.copy_expert.call_args.args
+    assert "COPY cnam_agrement_collectivite (cip, agrement_collectivite)" in copy_sql
+    assert buf.getvalue() == "3400949497294,True\n3400930301043,False\n3400930280300,\n"

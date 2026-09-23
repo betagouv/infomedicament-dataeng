@@ -15,11 +15,13 @@ logger = logging.getLogger(__name__)
 
 CEPS_PRICE_URL = "https://base-donnees-publique.medicaments.gouv.fr/download/file/CIS_CIP_bdpm.txt"
 CEPS_PRICE_TABLE = "ceps_price"
+CNAM_AGREMENT_TABLE = "cnam_agrement_collectivite"
 EXPECTED_COLUMN_COUNT = 13
 _PRICE_PATTERN = re.compile(r"\d+(?:,\d{3})*,\d{2}")
 _REIMBURSEMENT_RATE_PATTERN = re.compile(r"(\d+)\s*%")
 
 PriceRow = tuple[str, tuple[int, ...] | None, int | None, int | None, int | None]
+AgrementRow = tuple[str, bool | None]
 
 
 def _parse_price_cents(value: str, *, line_number: int, column_name: str) -> int | None:
@@ -45,14 +47,12 @@ def _parse_reimbursement_rates(value: str, *, line_number: int) -> tuple[int, ..
     return tuple(rates)
 
 
-def fetch_ceps_prices(url: str = CEPS_PRICE_URL) -> list[PriceRow]:
-    """Download and validate priced presentation rows from CIS_CIP_bdpm.txt."""
+def _fetch_presentation_rows(url: str) -> list[tuple[int, list[str]]]:
     with urllib.request.urlopen(url) as response:
         content = response.read().decode("utf-8-sig")
 
-    prices: list[PriceRow] = []
+    rows = []
     seen_cips: set[str] = set()
-    partial_price_rows = 0
     reader = csv.reader(io.StringIO(content), delimiter="\t")
     for line_number, row in enumerate(reader, start=1):
         if len(row) != EXPECTED_COLUMN_COUNT:
@@ -66,6 +66,19 @@ def fetch_ceps_prices(url: str = CEPS_PRICE_URL) -> list[PriceRow]:
         if cip in seen_cips:
             raise ValueError(f"Duplicate CIP13 on line {line_number}: {cip}")
         seen_cips.add(cip)
+        rows.append((line_number, row))
+
+    if not rows:
+        raise ValueError("The BDPM download is empty; refusing to truncate a table")
+    return rows
+
+
+def fetch_ceps_prices(url: str = CEPS_PRICE_URL) -> list[PriceRow]:
+    """Download and validate priced presentation rows from CIS_CIP_bdpm.txt."""
+    prices: list[PriceRow] = []
+    partial_price_rows = 0
+    for line_number, row in _fetch_presentation_rows(url):
+        cip = row[6].strip()
 
         reimbursement_rates = _parse_reimbursement_rates(row[8], line_number=line_number)
         price_values = (
@@ -84,6 +97,18 @@ def fetch_ceps_prices(url: str = CEPS_PRICE_URL) -> list[PriceRow]:
     if partial_price_rows:
         logger.warning(f"Found {partial_price_rows} presentation(s) with incomplete published price information")
     return prices
+
+
+def fetch_cnam_agrements(url: str = CEPS_PRICE_URL) -> list[AgrementRow]:
+    """Download agrément aux collectivités values keyed by CIP13."""
+    value_map = {"oui": True, "non": False, "inconnu": None}
+    agrements = []
+    for line_number, row in _fetch_presentation_rows(url):
+        raw_value = row[7].strip().lower()
+        if raw_value not in value_map:
+            raise ValueError(f"Invalid agrément aux collectivités on line {line_number}: {row[7]!r}")
+        agrements.append((row[6].strip(), value_map[raw_value]))
+    return agrements
 
 
 def import_ceps_prices(config: PostgresConfig | None = None, *, url: str = CEPS_PRICE_URL) -> int:
@@ -113,4 +138,29 @@ def import_ceps_prices(config: PostgresConfig | None = None, *, url: str = CEPS_
             )
 
     logger.info(f"Imported {len(rows)} presentation prices into '{CEPS_PRICE_TABLE}'")
+    return len(rows)
+
+
+def import_cnam_agrements(config: PostgresConfig | None = None, *, url: str = CEPS_PRICE_URL) -> int:
+    """Replace ``cnam_agrement_collectivite`` with the current BDPM data."""
+    if config is None:
+        config = get_config().postgres
+
+    rows = fetch_cnam_agrements(url)
+    buf = io.StringIO()
+    writer = csv.writer(buf, lineterminator="\n")
+    writer.writerows(rows)
+    buf.seek(0)
+
+    engine = get_postgres_engine(config)
+    with engine.begin() as conn:
+        conn.execute(text(f"TRUNCATE TABLE {CNAM_AGREMENT_TABLE}"))
+        raw = conn.connection.dbapi_connection
+        with raw.cursor() as cur:
+            cur.copy_expert(
+                f"COPY {CNAM_AGREMENT_TABLE} (cip, agrement_collectivite) FROM STDIN WITH (FORMAT csv)",
+                buf,
+            )
+
+    logger.info(f"Imported {len(rows)} presentation approvals into '{CNAM_AGREMENT_TABLE}'")
     return len(rows)
