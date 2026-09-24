@@ -69,3 +69,24 @@ datasets:
         type: str
       - name: url
         type: str
+
+  documents_bon_usage:
+    datagouv_dataset_id: "63eec8bb-2ce4-44c7-a44c-77876f5619d0"
+    postgresql_table: has_documents_bon_usage
+    source:
+      type: csv
+      delimiter: ";"
+      encoding: cp1252
+    columns:
+      - name: code_cis
+        type: str
+      - name: auteur
+        type: str
+      - name: type_document
+        type: str
+      - name: date_mise_a_jour
+        type: str
+      - name: titre
+        type: str
+      - name: url
+        type: str
