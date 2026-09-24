@@ -3,8 +3,9 @@
 import logging
 import os
 import re
+from datetime import datetime
 
-from sqlalchemy import create_engine, text
+from sqlalchemy import bindparam, create_engine, text
 from sqlalchemy.engine import URL, Engine
 
 from .config import DatabaseConfig, PostgresConfig, get_config
@@ -67,6 +68,58 @@ def get_glossary_terms(config: PostgresConfig | None = None) -> list[str]:
         return list(result.scalars())
 
 
+def get_semantic_import_worklist(
+    since: datetime | None,
+    config: PostgresConfig | None = None,
+    cis: str | None = None,
+    limit: int | None = None,
+) -> list[dict]:
+    """Return specialties and their ANSM documents for a DB-driven semantic import.
+
+    A specialty is selected when either its catalog row or one of its documents
+    changed since the cutoff. ``since=None`` selects the full catalog.
+    """
+    engine = get_postgres_engine(config)
+    query = text(
+        """
+        WITH selected AS (
+            SELECT s.cis, s.denomination, s.procedure
+            FROM ansm_specialite s
+            WHERE (:since IS NULL
+                   OR s.date_modification >= :since
+                   OR EXISTS (
+                       SELECT 1 FROM ansm_document changed
+                       WHERE changed.cis = s.cis AND changed.date_modification >= :since
+                   ))
+              AND (:cis IS NULL OR s.cis = :cis)
+            ORDER BY s.cis
+            LIMIT :limit
+        )
+        SELECT selected.cis, selected.denomination, selected.procedure,
+               d.type AS document_type, d.url
+        FROM selected
+        LEFT JOIN ansm_document d ON d.cis = selected.cis
+        ORDER BY selected.cis, d.type
+        """
+    )
+    with engine.connect() as conn:
+        rows = conn.execute(query, {"since": since, "cis": cis, "limit": limit}).mappings()
+        specialties: dict[str, dict] = {}
+        for row in rows:
+            item = specialties.setdefault(
+                str(row["cis"]),
+                {
+                    "cis": str(row["cis"]),
+                    "denomination": row["denomination"] or "",
+                    "procedure": row["procedure"] or "",
+                    "documents": {},
+                },
+            )
+            if row["document_type"] in {"notice", "rcp"} and row["url"]:
+                item["documents"][row["document_type"]] = row["url"]
+        return list(specialties.values())
+
+
 def get_filename_to_cis_mapping(config: DatabaseConfig | None = None) -> dict[str, str]:
     """Retrieve the filename → CIS mapping from MySQL."""
     engine = get_mysql_engine(config)
@@ -123,6 +176,19 @@ def get_centralised_worklist(
         target = next((url for url, rows in worklist.items() if any(c == cis for c, _ in rows)), None)
         return {target: worklist[target]} if target is not None else {}
     return worklist
+
+
+def get_centralised_urls(cis_codes: list[str], config: DatabaseConfig | None = None) -> dict[str, str]:
+    """Return the EMA product-information URL for each requested CIS."""
+    if not cis_codes:
+        return {}
+    engine = get_mysql_engine(config)
+    query = text(
+        "SELECT SpecId, UrlEpar FROM VUEmaEpar"
+        " WHERE SpecId IN :cis_codes AND UrlEpar IS NOT NULL AND UrlEpar <> ''"
+    ).bindparams(bindparam("cis_codes", expanding=True))
+    with engine.connect() as conn:
+        return {str(spec_id): url for spec_id, url in conn.execute(query, {"cis_codes": cis_codes}).fetchall()}
 
 
 def check_sequences(tables: list[str], fix: bool = False, config: PostgresConfig | None = None) -> list[tuple]:

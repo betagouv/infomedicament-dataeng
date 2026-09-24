@@ -8,8 +8,9 @@ import logging
 import multiprocessing as mp
 import os
 import time
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 import chardet
 from tqdm import tqdm
@@ -23,6 +24,7 @@ from .db import (
     get_authorized_cis,
     get_filename_to_cis_mapping,
     get_glossary_terms,
+    get_semantic_import_worklist,
     import_semantic_documents,
     import_to_postgres,
 )
@@ -342,6 +344,125 @@ def import_semantic_documents_from_s3(
         db_errors,
         skipped,
     )
+
+
+def import_semantic_documents_from_db(
+    since: datetime | None = None,
+    full: bool = False,
+    cis: str | None = None,
+    limite: int | None = None,
+    batch_size: int = 500,
+    image_base_url: str = DEFAULT_IMAGE_BASE_URL,
+) -> None:
+    """Import Notice/RCP content for specialties selected from PostgreSQL."""
+    from .centralise.acquire import get_ema_pdf, pdf_cache_key
+    from .centralise.match import match_presentation
+    from .centralise.parser import parse_pdf
+    from .db import get_centralised_urls
+
+    if full and since is not None:
+        raise ValueError("--full and --since are mutually exclusive")
+    cutoff = None if full else since or datetime.now(timezone.utc) - timedelta(hours=24)
+    config = get_config()
+    worklist = get_semantic_import_worklist(cutoff, config.postgres, cis=cis, limit=limite)
+    logger.info(
+        "%d specialties selected%s",
+        len(worklist),
+        " for a full import" if cutoff is None else f" since {cutoff.isoformat()}",
+    )
+    if not worklist:
+        return
+
+    s3_client = make_s3_client()
+    glossary_terms = get_glossary_terms(config.postgres)
+    records = {"rcp": [], "notice": []}
+    parse_errors = 0
+    total_imported = {"rcp": 0, "notice": 0}
+    total_db_errors = 0
+
+    def flush() -> None:
+        nonlocal total_db_errors
+        for doc_type, table in (("rcp", "rcp"), ("notice", "notices")):
+            if not records[doc_type]:
+                continue
+            imported, errors = import_semantic_documents(records[doc_type], table, config.postgres)
+            total_imported[doc_type] += imported
+            total_db_errors += errors
+            records[doc_type].clear()
+
+    centralised = [item for item in worklist if item["procedure"] == "CENTRALISEE"]
+    ema_urls = get_centralised_urls([item["cis"] for item in centralised])
+    by_url: dict[str, list[dict]] = {}
+    for item in centralised:
+        url = ema_urls.get(item["cis"])
+        if url:
+            by_url.setdefault(url, []).append(item)
+        else:
+            logger.warning("No EMA URL found for centralised CIS %s", item["cis"])
+
+    for item in tqdm(worklist, desc="ANSM documents", unit="specialty"):
+        if item["procedure"] == "CENTRALISEE":
+            continue
+        for doc_type, url in item["documents"].items():
+            try:
+                filename = os.path.basename(unquote(urlparse(url).path))
+                if not filename:
+                    raise ValueError(f"document URL has no filename: {url!r}")
+                prefix = config.s3.notice_prefix if doc_type == "notice" else config.s3.rcp_prefix
+                document = parse_semantic_document(
+                    s3_client.download_file_content(f"{prefix}{filename}"),
+                    image_base_url=image_base_url,
+                    glossary_terms=glossary_terms,
+                )
+                records[doc_type].append(
+                    {
+                        "cis": item["cis"],
+                        "filename": filename,
+                        "date_notif": document.date_notif.isoformat() if document.date_notif else None,
+                        "indication": document.indication,
+                        "content_html": document.content_html,
+                    }
+                )
+                if len(records[doc_type]) >= batch_size:
+                    flush()
+            except Exception as e:
+                logger.error("Failed to parse %s for CIS %s: %s", doc_type, item["cis"], e)
+                parse_errors += 1
+
+    for url, items in tqdm(by_url.items(), desc="EMA PDFs", unit="pdf"):
+        try:
+            parsed = parse_pdf(get_ema_pdf(url, s3_client), glossary_terms=glossary_terms)
+            _upload_images(s3_client, parsed["images"])
+            filename = pdf_cache_key(url).rsplit("/", 1)[-1]
+            for item in items:
+                for doc_type in ("rcp", "notice"):
+                    document = match_presentation(item["denomination"], parsed[doc_type])
+                    if document:
+                        records[doc_type].append(
+                            {
+                                "cis": item["cis"],
+                                "filename": filename,
+                                "date_notif": document["date_notif"],
+                                "indication": document["indication"],
+                                "content_html": document["content_html"],
+                            }
+                        )
+                        if len(records[doc_type]) >= batch_size:
+                            flush()
+        except Exception as e:
+            logger.error("Failed to parse EMA PDF %s: %s", url, e)
+            parse_errors += 1
+
+    flush()
+    logger.info(
+        "DB-driven import complete: %d RCP + %d Notice imported, %d parse errors, %d database errors",
+        total_imported["rcp"],
+        total_imported["notice"],
+        parse_errors,
+        total_db_errors,
+    )
+    if total_db_errors:
+        raise RuntimeError(f"Database import failed for {total_db_errors} document(s)")
 
 
 def traiter_depuis_s3(
@@ -1105,6 +1226,29 @@ Environment variables for database:
         help="Base URL used to rewrite relative document images",
     )
 
+    semantic_db_parser = subparsers.add_parser(
+        "semantic-db-import",
+        help="Import Notice/RCP documents for specialties selected from the database",
+    )
+    semantic_db_cutoff = semantic_db_parser.add_mutually_exclusive_group()
+    semantic_db_cutoff.add_argument(
+        "--since",
+        type=datetime.fromisoformat,
+        metavar="ISO-DATETIME",
+        help="Only process specialties/documents updated since this time (default: 24 hours ago)",
+    )
+    semantic_db_cutoff.add_argument("--full", action="store_true", help="Process the full specialty catalog")
+    semantic_db_parser.add_argument("--cis", help="Process only this CIS code")
+    semantic_db_parser.add_argument("--limit", type=int, help="Limit the number of specialties processed")
+    semantic_db_parser.add_argument(
+        "--batch-size", type=int, default=500, help="Documents per database import batch (default: 500)"
+    )
+    semantic_db_parser.add_argument(
+        "--image-base-url",
+        default=DEFAULT_IMAGE_BASE_URL,
+        help="Base URL used to rewrite relative document images",
+    )
+
     # S3 mode
     s3_parser = subparsers.add_parser("s3", help="Process from S3 (Clever Cloud Cellar)")
     s3_parser.add_argument("--cis-file", help="CIS file (default: uses database)")
@@ -1337,6 +1481,20 @@ Environment variables for database:
                 staging=args.staging,
                 image_base_url=args.image_base_url,
                 cis=args.cis,
+            )
+        except Exception as e:
+            logger.exception(f"Error: {e}")
+            raise SystemExit(1)
+
+    elif args.command == "semantic-db-import":
+        try:
+            import_semantic_documents_from_db(
+                since=args.since,
+                full=args.full,
+                cis=args.cis,
+                limite=args.limit,
+                batch_size=args.batch_size,
+                image_base_url=args.image_base_url,
             )
         except Exception as e:
             logger.exception(f"Error: {e}")

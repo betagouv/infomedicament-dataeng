@@ -102,6 +102,32 @@ the command. Terms whose `ref_glossaire.a_souligner` value is true are wrapped
 as `<span data-definition="Canonical glossary name">…</span>` so the frontend
 can attach an interactive definition UI.
 
+#### Database-driven semantic import
+
+Use the PostgreSQL `ansm_specialite` catalog as the starting point, then import
+each selected specialty's Notice and RCP. Non-centralised documents are read by
+their `ansm_document.url` filename from the configured S3 Notice/RCP prefixes.
+Centralised specialties use the existing EMA download/S3 cache and PDF parser.
+
+```bash
+# Default delta: specialty or document changed during the last 24 hours
+uv run infomedicament-dataeng semantic-db-import
+
+# Explicit cutoff (an ISO date or datetime)
+uv run infomedicament-dataeng semantic-db-import --since 2026-09-20T08:00:00+00:00
+
+# Full re-import
+uv run infomedicament-dataeng semantic-db-import --full
+
+# Targeted test
+uv run infomedicament-dataeng semantic-db-import --cis 61234567 --full --limit 1
+```
+
+`--since` and `--full` are mutually exclusive. A specialty is selected when
+either `ansm_specialite.date_modification` or one of its
+`ansm_document.date_modification` values reaches the cutoff. Imports are flushed
+to PostgreSQL every 500 documents by default; adjust this with `--batch-size`.
+
 #### Legacy S3 Mode (deprecated)
 
 Process HTML files from S3 (Clever Cloud Cellar) and write results back to S3:

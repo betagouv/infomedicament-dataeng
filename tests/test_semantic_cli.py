@@ -3,6 +3,7 @@
 import json
 import logging
 import sys
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -217,5 +218,82 @@ def test_main_routes_semantic_s3_import_arguments(monkeypatch):
             "staging": True,
             "image_base_url": "https://cdn.example.test/assets/",
             "cis": "67654321",
+        }
+    ]
+
+
+def test_import_semantic_documents_from_db_reads_only_selected_s3_documents(monkeypatch):
+    cutoff = datetime(2026, 9, 23, 12, tzinfo=timezone.utc)
+    worklist = [
+        {
+            "cis": "61234567",
+            "denomination": "MEDICAMENT TEST",
+            "procedure": "NATIONALE",
+            "documents": {
+                "notice": "https://ansm.example/documents/N0000001.htm",
+                "rcp": "https://ansm.example/documents/R0000001.htm",
+            },
+        }
+    ]
+
+    class FakeS3Client:
+        def __init__(self):
+            self.downloads = []
+
+        def download_file_content(self, key):
+            self.downloads.append(key)
+            return b'<p class="AmmDenomination">TEST</p><p class="AmmCorpsTexte">Body</p>'
+
+    client = FakeS3Client()
+    config = SimpleNamespace(
+        postgres="postgres-config",
+        s3=SimpleNamespace(notice_prefix="imports/notice/", rcp_prefix="imports/rcp/"),
+    )
+    worklist_calls = []
+    imports = []
+    monkeypatch.setattr(cli, "get_config", lambda: config)
+    monkeypatch.setattr(cli, "make_s3_client", lambda: client)
+    monkeypatch.setattr(cli, "get_glossary_terms", lambda config: [])
+    monkeypatch.setattr(
+        cli,
+        "get_semantic_import_worklist",
+        lambda since, config, cis, limit: worklist_calls.append((since, config, cis, limit)) or worklist,
+    )
+    monkeypatch.setattr("infomedicament_dataeng.db.get_centralised_urls", lambda cis_codes: {})
+    monkeypatch.setattr(
+        cli,
+        "import_semantic_documents",
+        lambda records, table, config: imports.append((table, list(records))) or (len(records), 0),
+    )
+
+    cli.import_semantic_documents_from_db(since=cutoff, cis="61234567", limite=1)
+
+    assert worklist_calls == [(cutoff, "postgres-config", "61234567", 1)]
+    assert client.downloads == ["imports/notice/N0000001.htm", "imports/rcp/R0000001.htm"]
+    assert [table for table, _ in imports] == ["rcp", "notices"]
+    assert imports[0][1][0]["cis"] == "61234567"
+    assert imports[1][1][0]["filename"] == "N0000001.htm"
+
+
+def test_main_routes_semantic_db_full_import(monkeypatch):
+    calls = []
+    monkeypatch.setattr(cli, "get_config", lambda: SimpleNamespace(log_level="INFO"))
+    monkeypatch.setattr(cli, "import_semantic_documents_from_db", lambda **kwargs: calls.append(kwargs))
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["infomedicament-dataeng", "semantic-db-import", "--full", "--cis", "61234567", "--limit", "1"],
+    )
+
+    cli.main()
+
+    assert calls == [
+        {
+            "since": None,
+            "full": True,
+            "cis": "61234567",
+            "limite": 1,
+            "batch_size": 500,
+            "image_base_url": cli.DEFAULT_IMAGE_BASE_URL,
         }
     ]
