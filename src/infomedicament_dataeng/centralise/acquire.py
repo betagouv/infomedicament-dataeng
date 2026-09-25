@@ -1,6 +1,7 @@
 """Acquire EMA product-information PDFs, cached on S3 to avoid re-scraping EMA."""
 
 import hashlib
+import json
 import logging
 import time
 import urllib.error
@@ -11,6 +12,10 @@ from ..config import get_config
 from ..s3 import S3Client, make_s3_client
 
 logger = logging.getLogger(__name__)
+
+EMA_DOCUMENT_REPORT_URL = (
+    "https://www.ema.europa.eu/en/documents/report/documents-output-epar_documents_json-report_en.json"
+)
 
 # EMA serves the PDF fine with a plain UA; set one to avoid default-urllib blocks.
 _USER_AGENT = "infomedicament-dataeng/0.1 (+https://info-medicaments.fr)"
@@ -51,7 +56,7 @@ def pdf_cache_key(url: str) -> str:
 
 
 def _fetch_from_ema(url: str) -> bytes:
-    logger.info(f"Fetching PDF from EMA: {url}")
+    logger.info(f"Fetching from EMA: {url}")
     req = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})
     for attempt in range(_MAX_RETRIES):
         try:
@@ -64,6 +69,45 @@ def _fetch_from_ema(url: str) -> bytes:
             logger.warning(f"EMA returned 429; retrying in {wait:.0f}s ({attempt + 1}/{_MAX_RETRIES}): {url}")
             time.sleep(wait)
     raise RuntimeError("unreachable")  # loop either returns or raises
+
+
+def fetch_ema_document_report() -> dict:
+    """Download and decode the current EMA EPAR document report without caching it."""
+    logger.info("Downloading current EMA EPAR document report")
+    report = json.loads(_fetch_from_ema(EMA_DOCUMENT_REPORT_URL))
+    if not isinstance(report, dict) or not isinstance(report.get("data"), list):
+        raise ValueError("EMA EPAR document report has an unexpected structure: missing data array")
+    return report
+
+
+def build_product_information_index(report: dict) -> dict[str, dict]:
+    """Map EMA product numbers to their latest product-information metadata."""
+    index: dict[str, dict] = {}
+    for document in report.get("data", []):
+        if not isinstance(document, dict) or document.get("type") != "product-information":
+            continue
+        product_number = str(document.get("ema_product_number") or "").strip()
+        if not product_number:
+            continue
+        last_updated = str(document.get("last_updated_date") or "")
+        if product_number in index and last_updated < index[product_number]["last_updated_date"]:
+            continue
+        translations = document.get("translations")
+        french_url = translations.get("fr") if isinstance(translations, dict) else None
+        index[product_number] = {
+            "french_url": french_url if isinstance(french_url, str) and french_url.strip() else None,
+            "last_updated_date": last_updated,
+        }
+    return index
+
+
+def build_french_product_information_index(report: dict) -> dict[str, str | None]:
+    """Map EMA product numbers to French product-information PDF URLs.
+
+    A present key with a ``None`` value means that the product-information
+    record exists but EMA does not provide a French translation.
+    """
+    return {code: document["french_url"] for code, document in build_product_information_index(report).items()}
 
 
 def get_ema_pdf(

@@ -11,6 +11,7 @@ import time
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import unquote, urlparse
+from urllib.request import Request, urlopen
 
 import chardet
 from tqdm import tqdm
@@ -41,12 +42,30 @@ from .s3 import make_s3_client
 
 logger = logging.getLogger(__name__)
 
+_DOCUMENT_USER_AGENT = "infomedicament-dataeng/0.1 (+https://info-medicaments.fr)"
+
 
 def charger_html_bytes(content: bytes) -> str:
     """Decode HTML bytes with automatic encoding detection."""
     detected = chardet.detect(content)
     encoding = detected.get("encoding", "utf-8") or "utf-8"
     return content.decode(encoding)
+
+
+def _download_document(url: str) -> bytes:
+    """Download an ANSM document from the HTTPS object URL stored in PostgreSQL."""
+    parsed = urlparse(url)
+    if parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.password:
+        raise ValueError(f"ANSM document URL must be an HTTPS URL without credentials: {url!r}")
+    request = Request(url, headers={"User-Agent": _DOCUMENT_USER_AGENT})
+    with urlopen(request, timeout=60) as response:
+        return response.read()
+
+
+def _document_image_base_url(url: str) -> str:
+    """Return the ANSM export's root image directory for a document URL."""
+    parsed = urlparse(url)
+    return parsed._replace(path="/images/", params="", query="", fragment="").geturl()
 
 
 def traiter_fichier_local(fichier_data: tuple) -> dict | None:
@@ -352,19 +371,34 @@ def import_semantic_documents_from_db(
     cis: str | None = None,
     limite: int | None = None,
     batch_size: int = 500,
-    image_base_url: str = DEFAULT_IMAGE_BASE_URL,
 ) -> None:
     """Import Notice/RCP content for specialties selected from PostgreSQL."""
     from .centralise.acquire import get_ema_pdf, pdf_cache_key
     from .centralise.match import match_presentation
     from .centralise.parser import parse_pdf
-    from .db import get_centralised_urls
 
     if full and since is not None:
         raise ValueError("--full and --since are mutually exclusive")
     cutoff = None if full else since or datetime.now(timezone.utc) - timedelta(hours=24)
     config = get_config()
-    worklist = get_semantic_import_worklist(cutoff, config.postgres, cis=cis, limit=limite)
+    worklist = get_semantic_import_worklist(cutoff, config.postgres, cis=cis, limit=None)
+
+    from .centralise.acquire import build_product_information_index, fetch_ema_document_report
+    from .db import get_centralised_specialties
+
+    all_centralised = get_centralised_specialties(config.postgres, cis=cis)
+    ema_index = build_product_information_index(fetch_ema_document_report()) if all_centralised else {}
+    selected_by_cis = {item["cis"]: item for item in worklist}
+    for specialty in all_centralised:
+        document = ema_index.get(specialty["code_ema"].strip())
+        if cutoff is None or (document and _ema_document_updated_since(document, cutoff)):
+            selected_by_cis.setdefault(
+                specialty["cis"],
+                {**specialty, "procedure": "CENTRALISEE", "documents": {}},
+            )
+    worklist = sorted(selected_by_cis.values(), key=lambda item: item["cis"])
+    if limite is not None:
+        worklist = worklist[:limite]
     logger.info(
         "%d specialties selected%s",
         len(worklist),
@@ -391,14 +425,7 @@ def import_semantic_documents_from_db(
             records[doc_type].clear()
 
     centralised = [item for item in worklist if item["procedure"] == "CENTRALISEE"]
-    ema_urls = get_centralised_urls([item["cis"] for item in centralised])
-    by_url: dict[str, list[dict]] = {}
-    for item in centralised:
-        url = ema_urls.get(item["cis"])
-        if url:
-            by_url.setdefault(url, []).append(item)
-        else:
-            logger.warning("No EMA URL found for centralised CIS %s", item["cis"])
+    ema_worklist = _get_ema_worklist(centralised, ema_index) if centralised else {}
 
     for item in tqdm(worklist, desc="ANSM documents", unit="specialty"):
         if item["procedure"] == "CENTRALISEE":
@@ -408,10 +435,9 @@ def import_semantic_documents_from_db(
                 filename = os.path.basename(unquote(urlparse(url).path))
                 if not filename:
                     raise ValueError(f"document URL has no filename: {url!r}")
-                prefix = config.s3.notice_prefix if doc_type == "notice" else config.s3.rcp_prefix
                 document = parse_semantic_document(
-                    s3_client.download_file_content(f"{prefix}{filename}"),
-                    image_base_url=image_base_url,
+                    _download_document(url),
+                    image_base_url=_document_image_base_url(url),
                     glossary_terms=glossary_terms,
                 )
                 records[doc_type].append(
@@ -426,10 +452,10 @@ def import_semantic_documents_from_db(
                 if len(records[doc_type]) >= batch_size:
                     flush()
             except Exception as e:
-                logger.error("Failed to parse %s for CIS %s: %s", doc_type, item["cis"], e)
+                logger.error("Failed to download or parse %s for CIS %s from %s: %s", doc_type, item["cis"], url, e)
                 parse_errors += 1
 
-    for url, items in tqdm(by_url.items(), desc="EMA PDFs", unit="pdf"):
+    for url, items in tqdm(ema_worklist.items(), desc="EMA PDFs", unit="pdf"):
         try:
             parsed = parse_pdf(get_ema_pdf(url, s3_client), glossary_terms=glossary_terms)
             _upload_images(s3_client, parsed["images"])
@@ -906,6 +932,62 @@ def run_import_datagouv(config_path: Path, dataset_name: str | None = None) -> N
         logger.info(f"Done: {count} rows imported into '{dataset.postgresql_table}'")
 
 
+def _ema_document_updated_since(document: dict, cutoff: datetime) -> bool:
+    """Return whether EMA's product-information timestamp reaches the cutoff."""
+    value = document.get("last_updated_date")
+    if not value:
+        return False
+    try:
+        updated = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        logger.error("Invalid EMA product-information last_updated_date: %r", value)
+        return False
+    if cutoff.tzinfo is None:
+        cutoff = cutoff.replace(tzinfo=timezone.utc)
+    if updated.tzinfo is None:
+        updated = updated.replace(tzinfo=timezone.utc)
+    return updated >= cutoff
+
+
+def _get_ema_worklist(
+    specialties: list[dict], document_index: dict[str, dict] | None = None
+) -> dict[str, list[dict]]:
+    """Resolve centralised specialties to current French EMA PI URLs."""
+    from .centralise.acquire import build_product_information_index, fetch_ema_document_report
+
+    if not specialties:
+        return {}
+    index = (
+        document_index
+        if document_index is not None
+        else build_product_information_index(fetch_ema_document_report())
+    )
+    worklist: dict[str, list[dict]] = {}
+    for specialty in specialties:
+        cis = specialty["cis"]
+        code_ema = str(specialty.get("code_ema") or "").strip()
+        if not code_ema:
+            logger.error("EMA product information missing for CIS %s: ansm_specialite.code_ema is empty", cis)
+            continue
+        if code_ema not in index:
+            logger.error(
+                "EMA product information missing for CIS %s: no product-information record for EMA code %s",
+                cis,
+                code_ema,
+            )
+            continue
+        french_url = index[code_ema]["french_url"]
+        if not french_url:
+            logger.error(
+                "French EMA product-information translation missing for CIS %s (EMA code %s)",
+                cis,
+                code_ema,
+            )
+            continue
+        worklist.setdefault(french_url, []).append(specialty)
+    return worklist
+
+
 def run_centralise_fetch(cis: str | None = None, refresh: bool = False, limite: int | None = None) -> None:
     """Download and cache EMA product-information PDFs on S3 (acquisition step).
 
@@ -913,10 +995,11 @@ def run_centralise_fetch(cis: str | None = None, refresh: bool = False, limite: 
     prototyped on one PDF without an expensive initial parse run.
     """
     from .centralise.acquire import get_ema_pdf, pdf_cache_key
-    from .db import get_centralised_worklist
+    from .db import get_centralised_specialties
 
+    config = get_config()
     s3_client = make_s3_client()
-    worklist = get_centralised_worklist(cis=cis)
+    worklist = _get_ema_worklist(get_centralised_specialties(config.postgres, cis=cis))
     if not worklist:
         logger.warning(f"No EMA PDFs found in worklist{f' for CIS {cis}' if cis else ''}")
         return
@@ -996,7 +1079,7 @@ def run_centralise_parse(
     """
     from .centralise.match import match_presentation
     from .centralise.parser import parse_pdf
-    from .db import get_centralised_worklist
+    from .db import get_centralised_specialties
 
     def record(doc: dict, filename: str, cis_code: str) -> dict:
         return {
@@ -1015,11 +1098,10 @@ def run_centralise_parse(
     if pdf_path:
         if not cis:
             raise ValueError("--pdf requires --cis to match and import the correct presentation")
-        worklist = get_centralised_worklist(cis=cis)
-        cis_row = next((row for rows in worklist.values() for row in rows if str(row[0]) == str(cis)), None)
+        cis_row = next(iter(get_centralised_specialties(config.postgres, cis=cis)), None)
         if cis_row is None:
             raise ValueError(f"No centralised medicine found for CIS {cis}")
-        denomination = cis_row[1]
+        denomination = cis_row["denomination"]
         res = parse_pdf(Path(pdf_path).read_bytes(), glossary_terms=glossary_terms)
         uploaded = _upload_images(s3_client, res["images"])
         filename = os.path.basename(pdf_path)
@@ -1048,7 +1130,7 @@ def run_centralise_parse(
 
     from .centralise.acquire import get_ema_pdf, pdf_cache_key
 
-    worklist = get_centralised_worklist(cis=cis)
+    worklist = _get_ema_worklist(get_centralised_specialties(config.postgres, cis=cis))
     urls = list(worklist)
     if limite is not None:
         urls = urls[:limite]
@@ -1105,7 +1187,9 @@ def run_centralise_parse(
                 )
                 total_images += _upload_images(s3_client, res["images"])  # before records reference them
                 filename = pdf_cache_key(url).split("/")[-1]
-                for cis_code, denom in worklist[url]:
+                for specialty in worklist[url]:
+                    cis_code = specialty["cis"]
+                    denom = specialty["denomination"]
                     rcp_doc = match_presentation(denom, res["rcp"])
                     notice_doc = match_presentation(denom, res["notice"])
                     if rcp_doc:
@@ -1235,18 +1319,13 @@ Environment variables for database:
         "--since",
         type=datetime.fromisoformat,
         metavar="ISO-DATETIME",
-        help="Only process specialties/documents updated since this time (default: 24 hours ago)",
+        help="Only process ANSM/EMA documents updated since this time (default: 24 hours ago)",
     )
     semantic_db_cutoff.add_argument("--full", action="store_true", help="Process the full specialty catalog")
     semantic_db_parser.add_argument("--cis", help="Process only this CIS code")
     semantic_db_parser.add_argument("--limit", type=int, help="Limit the number of specialties processed")
     semantic_db_parser.add_argument(
         "--batch-size", type=int, default=500, help="Documents per database import batch (default: 500)"
-    )
-    semantic_db_parser.add_argument(
-        "--image-base-url",
-        default=DEFAULT_IMAGE_BASE_URL,
-        help="Base URL used to rewrite relative document images",
     )
 
     # S3 mode
@@ -1494,7 +1573,6 @@ Environment variables for database:
                 cis=args.cis,
                 limite=args.limit,
                 batch_size=args.batch_size,
-                image_base_url=args.image_base_url,
             )
         except Exception as e:
             logger.exception(f"Error: {e}")

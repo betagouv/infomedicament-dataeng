@@ -127,7 +127,7 @@ def _by_strength(spec_denom: str, docs: list[dict]) -> list[dict] | None:
     The strength is a hard constraint, not just another token: a 100 unités/mL CIS
     must never get the 200 unités/mL SmPC. Returning None makes the caller skip the
     CIS entirely — an EMA PDF that covers no matching strength (a strength since
-    discontinued at EU level, or a wrong ``UrlEpar`` upstream) has nothing to say
+    discontinued at EU level, or a wrong EMA product mapping upstream) has nothing to say
     about this presentation, and serving another strength's dosing is worse than
     serving nothing. The check is skipped when no strength is readable on either
     side, so a PDF whose denomination failed to extract is not silently dropped.

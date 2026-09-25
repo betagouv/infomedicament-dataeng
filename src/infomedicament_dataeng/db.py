@@ -5,7 +5,7 @@ import os
 import re
 from datetime import datetime
 
-from sqlalchemy import bindparam, create_engine, text
+from sqlalchemy import create_engine, text
 from sqlalchemy.engine import URL, Engine
 
 from .config import DatabaseConfig, PostgresConfig, get_config
@@ -76,17 +76,16 @@ def get_semantic_import_worklist(
 ) -> list[dict]:
     """Return specialties and their ANSM documents for a DB-driven semantic import.
 
-    A specialty is selected when either its catalog row or one of its documents
-    changed since the cutoff. ``since=None`` selects the full catalog.
+    A specialty is selected when one of its documents changed since the cutoff.
+    ``since=None`` selects the full catalog.
     """
     engine = get_postgres_engine(config)
     query = text(
         """
         WITH selected AS (
-            SELECT s.cis, s.denomination, s.procedure
+            SELECT s.cis, s.denomination, s.procedure, s.code_ema
             FROM ansm_specialite s
             WHERE (:since IS NULL
-                   OR s.date_modification >= :since
                    OR EXISTS (
                        SELECT 1 FROM ansm_document changed
                        WHERE changed.cis = s.cis AND changed.date_modification >= :since
@@ -95,7 +94,7 @@ def get_semantic_import_worklist(
             ORDER BY s.cis
             LIMIT :limit
         )
-        SELECT selected.cis, selected.denomination, selected.procedure,
+        SELECT selected.cis, selected.denomination, selected.procedure, selected.code_ema,
                d.type AS document_type, d.url
         FROM selected
         LEFT JOIN ansm_document d ON d.cis = selected.cis
@@ -112,6 +111,7 @@ def get_semantic_import_worklist(
                     "cis": str(row["cis"]),
                     "denomination": row["denomination"] or "",
                     "procedure": row["procedure"] or "",
+                    "code_ema": row["code_ema"] or "",
                     "documents": {},
                 },
             )
@@ -145,50 +145,28 @@ def get_authorized_cis(config: DatabaseConfig | None = None) -> set[str]:
         return {str(row[0]) for row in result.fetchall()}
 
 
-def get_centralised_worklist(
-    config: DatabaseConfig | None = None, cis: str | None = None
-) -> dict[str, list[tuple[str, str]]]:
-    """Map each distinct EMA PI PDF URL to the ``(CIS, denomination)`` sharing it.
-
-    Reads the PDBM ``VUEmaEpar`` view (``SpecId`` = codeCIS, ``UrlEpar`` = the
-    direct French PI PDF), joined to ``Specialite`` for each CIS's ``SpecDenom01``.
-    Many CIS share one PDF — one per device presentation — so callers parse each
-    URL once and match each CIS to its presentation via its denomination.
-
-    When ``cis`` is given, only the PDF for that CIS is returned (still grouped
-    with its sibling CIS), so the pipeline can be prototyped on a single PDF.
-    Returns an empty dict if the CIS has no EMA PDF.
-    """
-    engine = get_mysql_engine(config)
-    worklist: dict[str, list[tuple[str, str]]] = {}
+def get_centralised_specialties(
+    config: PostgresConfig | None = None, cis: str | None = None
+) -> list[dict[str, str]]:
+    """Return centralised specialties and their EMA product number from PostgreSQL."""
+    engine = get_postgres_engine(config)
     with engine.connect() as conn:
-        result = conn.execute(
+        rows = conn.execute(
             text(
-                "SELECT v.SpecId, v.UrlEpar, s.SpecDenom01"
-                " FROM VUEmaEpar v LEFT JOIN Specialite s ON s.SpecId = v.SpecId"
-                " WHERE v.UrlEpar IS NOT NULL AND v.UrlEpar <> ''"
-            )
-        )
-        for spec_id, url, denom in result.fetchall():
-            worklist.setdefault(url, []).append((str(spec_id), denom or ""))
-
-    if cis is not None:
-        target = next((url for url, rows in worklist.items() if any(c == cis for c, _ in rows)), None)
-        return {target: worklist[target]} if target is not None else {}
-    return worklist
-
-
-def get_centralised_urls(cis_codes: list[str], config: DatabaseConfig | None = None) -> dict[str, str]:
-    """Return the EMA product-information URL for each requested CIS."""
-    if not cis_codes:
-        return {}
-    engine = get_mysql_engine(config)
-    query = text(
-        "SELECT SpecId, UrlEpar FROM VUEmaEpar"
-        " WHERE SpecId IN :cis_codes AND UrlEpar IS NOT NULL AND UrlEpar <> ''"
-    ).bindparams(bindparam("cis_codes", expanding=True))
-    with engine.connect() as conn:
-        return {str(spec_id): url for spec_id, url in conn.execute(query, {"cis_codes": cis_codes}).fetchall()}
+                "SELECT cis, denomination, code_ema FROM ansm_specialite"
+                " WHERE procedure = 'CENTRALISEE' AND (:cis IS NULL OR cis = :cis)"
+                " ORDER BY cis"
+            ),
+            {"cis": cis},
+        ).mappings()
+        return [
+            {
+                "cis": str(row["cis"]),
+                "denomination": row["denomination"] or "",
+                "code_ema": row["code_ema"] or "",
+            }
+            for row in rows
+        ]
 
 
 def check_sequences(tables: list[str], fix: bool = False, config: PostgresConfig | None = None) -> list[tuple]:

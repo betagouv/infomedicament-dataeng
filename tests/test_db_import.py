@@ -300,6 +300,7 @@ def test_semantic_import_worklist_groups_documents_and_passes_cutoff(monkeypatch
             "cis": "1",
             "denomination": "TEST",
             "procedure": "NATIONALE",
+            "code_ema": None,
             "document_type": "notice",
             "url": "https://example/N1.htm",
         },
@@ -307,6 +308,7 @@ def test_semantic_import_worklist_groups_documents_and_passes_cutoff(monkeypatch
             "cis": "1",
             "denomination": "TEST",
             "procedure": "NATIONALE",
+            "code_ema": None,
             "document_type": "rcp",
             "url": "https://example/R1.htm",
         },
@@ -329,7 +331,10 @@ def test_semantic_import_worklist_groups_documents_and_passes_cutoff(monkeypatch
             "cis": "1",
             "denomination": "TEST",
             "procedure": "NATIONALE",
+            "code_ema": "",
             "documents": {"notice": "https://example/N1.htm", "rcp": "https://example/R1.htm"},
         }
     ]
     assert connection.execute.call_args.args[1] == {"since": cutoff, "cis": "1", "limit": 10}
+    assert "s.date_modification" not in str(connection.execute.call_args.args[0])
+    assert "changed.date_modification >= :since" in str(connection.execute.call_args.args[0])
