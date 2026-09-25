@@ -1,6 +1,9 @@
 """Tests for ANSM datapackage import configuration."""
 
-from infomedicament_dataeng.datapackage_importer import LOAD_ORDER
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
+
+from infomedicament_dataeng.datapackage_importer import LOAD_ORDER, _load_resource
 
 
 def test_load_order_covers_current_ansm_package_resources():
@@ -58,3 +61,16 @@ def test_load_order_places_new_resources_after_their_parents():
 
     for child, parent in dependencies:
         assert positions[parent] < positions[child]
+
+
+def test_specialty_resource_synchronizes_metadata_when_empty():
+    package = SimpleNamespace(get_resource=lambda name: SimpleNamespace(read_rows=lambda: []))
+    conn = MagicMock()
+    engine = MagicMock()
+    engine.begin.return_value.__enter__.return_value = conn
+    engine.begin.return_value.__exit__.return_value = False
+
+    with patch("infomedicament_dataeng.datapackage_importer.sync_specialites_metadata") as sync_metadata:
+        assert _load_resource(package, "specialite", "ansm_specialite", engine) == 0
+
+    sync_metadata.assert_called_once_with(conn)

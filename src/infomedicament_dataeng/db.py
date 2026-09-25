@@ -4,12 +4,13 @@ import logging
 from collections.abc import Iterator
 from datetime import datetime
 
-from sqlalchemy import create_engine, text
+from sqlalchemy import bindparam, create_engine, text
 from sqlalchemy.engine import URL, Engine
 
 from .config import PostgresConfig, get_config
 
 logger = logging.getLogger(__name__)
+VISIBLE_SPECIALITE_AVAILABILITIES = ("DISPONIBLE", "PARTIELLE", "ALERTE")
 
 
 def get_postgres_engine(config: PostgresConfig | None = None) -> Engine:
@@ -180,12 +181,50 @@ def _upsert_semantic_document(conn, table: str, record: dict) -> None:
 
     if table == "notices":
         conn.execute(
-            text('UPDATE specialites_metadata SET description = :description WHERE "CIS" = :cis'),
+            text(
+                'INSERT INTO specialites_metadata ("CIS", title, description)'
+                " SELECT cis::integer, COALESCE(denomination, ''), :description"
+                " FROM ansm_specialite"
+                " WHERE cis = :cis_text AND disponibilite IN :availabilities"
+                ' ON CONFLICT ("CIS") DO UPDATE'
+                " SET title = EXCLUDED.title, description = EXCLUDED.description"
+            ).bindparams(bindparam("availabilities", expanding=True)),
             {
-                "cis": int(cis),
+                "cis_text": str(cis),
                 "description": record.get("indication") or "",
+                "availabilities": VISIBLE_SPECIALITE_AVAILABILITIES,
             },
         )
+
+
+def sync_specialites_metadata(conn) -> None:
+    """Synchronize metadata identity fields from the visible specialty catalog."""
+    conn.execute(
+        text(
+            'INSERT INTO specialites_metadata ("CIS", title, description)'
+            " SELECT cis::integer, COALESCE(denomination, ''), ''"
+            " FROM ansm_specialite"
+            " WHERE disponibilite IN :availabilities"
+            ' ON CONFLICT ("CIS") DO UPDATE SET title = EXCLUDED.title'
+        ).bindparams(bindparam("availabilities", expanding=True)),
+        {"availabilities": VISIBLE_SPECIALITE_AVAILABILITIES},
+    )
+    conn.execute(
+        text(
+            "DELETE FROM specialites_metadata metadata"
+            " WHERE NOT EXISTS ("
+            ' SELECT 1 FROM ansm_specialite specialty WHERE specialty.cis::integer = metadata."CIS"'
+            " AND specialty.disponibilite IN :availabilities)"
+        ).bindparams(bindparam("availabilities", expanding=True)),
+        {"availabilities": VISIBLE_SPECIALITE_AVAILABILITIES},
+    )
+
+
+def sync_specialites_metadata_from_db(config: PostgresConfig | None = None) -> None:
+    """Reconcile metadata identity fields in a standalone transaction."""
+    engine = get_postgres_engine(config)
+    with engine.begin() as conn:
+        sync_specialites_metadata(conn)
 
 
 def import_semantic_documents(

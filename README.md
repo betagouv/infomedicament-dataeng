@@ -62,7 +62,7 @@ Options:
 
 `--centralised-only` and `--non-centralised-only` are mutually exclusive. Either flag can be combined with `--full`, `--since`, `--cis`, `--limit`, and `--batch-size`.
 
-The importer writes semantic HTML to `notices.content_html` and `rcp.content_html`. Notice indications also update `specialites_metadata.description`. Glossary terms marked with `ref_glossaire.a_souligner` are annotated in the generated HTML.
+The importer writes semantic HTML to `notices.content_html` and `rcp.content_html`. Notice imports upsert `specialites_metadata.description`, while full semantic imports and ANSM specialty catalog imports reconcile metadata `CIS` and `title` values. Glossary terms marked with `ref_glossaire.a_souligner` are annotated in the generated HTML.
 
 ### Local semantic parser
 

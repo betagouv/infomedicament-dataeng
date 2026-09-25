@@ -18,7 +18,13 @@ from .config import get_config
 from .convert import sql_to_csv
 from .datagouv import import_dataset, load_datasets
 from .datapackage_importer import import_datapackage
-from .db import get_glossary_terms, get_semantic_import_worklist, import_semantic_documents, iter_pediatric_rcps
+from .db import (
+    get_glossary_terms,
+    get_semantic_import_worklist,
+    import_semantic_documents,
+    iter_pediatric_rcps,
+    sync_specialites_metadata_from_db,
+)
 from .parsing import DEFAULT_IMAGE_BASE_URL, parse_semantic_document
 from .s3 import make_s3_client
 
@@ -142,6 +148,8 @@ def import_semantic_documents_from_db(
         raise ValueError("--centralised-only and --non-centralised-only are mutually exclusive")
     cutoff = None if full else since or datetime.now(timezone.utc) - timedelta(hours=24)
     config = get_config()
+    if full:
+        sync_specialites_metadata_from_db(config.postgres)
     worklist = get_semantic_import_worklist(cutoff, config.postgres, cis=cis, limit=None)
 
     from .centralise.acquire import build_product_information_index, fetch_ema_document_report

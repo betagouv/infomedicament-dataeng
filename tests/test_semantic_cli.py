@@ -271,6 +271,19 @@ def test_main_routes_semantic_db_full_import(monkeypatch):
     ]
 
 
+def test_full_db_import_reconciles_specialty_metadata(monkeypatch):
+    synced = []
+    config = SimpleNamespace(postgres="postgres-config")
+    monkeypatch.setattr(cli, "get_config", lambda: config)
+    monkeypatch.setattr(cli, "sync_specialites_metadata_from_db", lambda config: synced.append(config))
+    monkeypatch.setattr(cli, "get_semantic_import_worklist", lambda *args, **kwargs: [])
+    monkeypatch.setattr("infomedicament_dataeng.db.get_centralised_specialties", lambda config, cis=None: [])
+
+    cli.import_semantic_documents_from_db(full=True)
+
+    assert synced == ["postgres-config"]
+
+
 def test_main_rejects_conflicting_semantic_db_source_flags(monkeypatch):
     monkeypatch.setattr(
         sys,
