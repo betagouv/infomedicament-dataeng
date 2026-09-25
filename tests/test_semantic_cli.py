@@ -147,14 +147,22 @@ def test_import_semantic_documents_from_db_reads_selected_document_urls(monkeypa
         "get_semantic_import_worklist",
         lambda since, config, cis, limit: worklist_calls.append((since, config, cis, limit)) or worklist,
     )
-    monkeypatch.setattr("infomedicament_dataeng.db.get_centralised_specialties", lambda config, cis=None: [])
+    monkeypatch.setattr(
+        "infomedicament_dataeng.db.get_centralised_specialties",
+        lambda *args, **kwargs: pytest.fail("centralised specialties should not be queried"),
+    )
     monkeypatch.setattr(
         cli,
         "import_semantic_documents",
         lambda records, table, config: imports.append((table, list(records))) or (len(records), 0),
     )
 
-    cli.import_semantic_documents_from_db(since=cutoff, cis="61234567", limite=1)
+    cli.import_semantic_documents_from_db(
+        since=cutoff,
+        cis="61234567",
+        limite=1,
+        non_centralised_only=True,
+    )
 
     assert worklist_calls == [(cutoff, "postgres-config", "61234567", None)]
     assert downloads == [
@@ -203,7 +211,19 @@ def test_db_import_selects_centralised_specialty_updated_only_at_ema(monkeypatch
     selected = []
     config = SimpleNamespace(postgres="postgres-config")
     monkeypatch.setattr(cli, "get_config", lambda: config)
-    monkeypatch.setattr(cli, "get_semantic_import_worklist", lambda *args, **kwargs: [])
+    monkeypatch.setattr(
+        cli,
+        "get_semantic_import_worklist",
+        lambda *args, **kwargs: [
+            {
+                "cis": "60000000",
+                "denomination": "ANSM TEST",
+                "procedure": "NATIONALE",
+                "documents": {"rcp": "https://ansm.example/R0000001.htm"},
+            }
+        ],
+    )
+    monkeypatch.setattr(cli, "_download_document", lambda url: pytest.fail("ANSM documents should not be downloaded"))
     monkeypatch.setattr("infomedicament_dataeng.db.get_centralised_specialties", lambda config, cis=None: [specialty])
     monkeypatch.setattr(acquire, "fetch_ema_document_report", lambda: {"data": []})
     monkeypatch.setattr(acquire, "build_product_information_index", lambda report: ema_index)
@@ -212,7 +232,7 @@ def test_db_import_selects_centralised_specialty_updated_only_at_ema(monkeypatch
     monkeypatch.setattr(cli, "get_glossary_terms", lambda config: [])
     monkeypatch.setattr(cli, "import_semantic_documents", lambda records, table, config: (0, 0))
 
-    cli.import_semantic_documents_from_db(since=cutoff)
+    cli.import_semantic_documents_from_db(since=cutoff, centralised_only=True)
 
     assert selected == [{**specialty, "procedure": "CENTRALISEE", "documents": {}}]
 
@@ -224,7 +244,16 @@ def test_main_routes_semantic_db_full_import(monkeypatch):
     monkeypatch.setattr(
         sys,
         "argv",
-        ["infomedicament-dataeng", "semantic-db-import", "--full", "--cis", "61234567", "--limit", "1"],
+        [
+            "infomedicament-dataeng",
+            "semantic-db-import",
+            "--full",
+            "--cis",
+            "61234567",
+            "--limit",
+            "1",
+            "--centralised-only",
+        ],
     )
 
     cli.main()
@@ -236,8 +265,26 @@ def test_main_routes_semantic_db_full_import(monkeypatch):
             "cis": "61234567",
             "limite": 1,
             "batch_size": 500,
+            "centralised_only": True,
+            "non_centralised_only": False,
         }
     ]
+
+
+def test_main_rejects_conflicting_semantic_db_source_flags(monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "infomedicament-dataeng",
+            "semantic-db-import",
+            "--centralised-only",
+            "--non-centralised-only",
+        ],
+    )
+
+    with pytest.raises(SystemExit, match="2"):
+        cli.main()
 
 
 def test_main_routes_pediatric_classification_from_postgres(monkeypatch, tmp_path):

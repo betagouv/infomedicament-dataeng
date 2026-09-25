@@ -128,6 +128,8 @@ def import_semantic_documents_from_db(
     cis: str | None = None,
     limite: int | None = None,
     batch_size: int = 500,
+    centralised_only: bool = False,
+    non_centralised_only: bool = False,
 ) -> None:
     """Import Notice/RCP content for specialties selected from PostgreSQL."""
     from .centralise.acquire import get_ema_pdf, pdf_cache_key
@@ -136,6 +138,8 @@ def import_semantic_documents_from_db(
 
     if full and since is not None:
         raise ValueError("--full and --since are mutually exclusive")
+    if centralised_only and non_centralised_only:
+        raise ValueError("--centralised-only and --non-centralised-only are mutually exclusive")
     cutoff = None if full else since or datetime.now(timezone.utc) - timedelta(hours=24)
     config = get_config()
     worklist = get_semantic_import_worklist(cutoff, config.postgres, cis=cis, limit=None)
@@ -143,7 +147,12 @@ def import_semantic_documents_from_db(
     from .centralise.acquire import build_product_information_index, fetch_ema_document_report
     from .db import get_centralised_specialties
 
-    all_centralised = get_centralised_specialties(config.postgres, cis=cis)
+    if centralised_only:
+        worklist = [item for item in worklist if item["procedure"] == "CENTRALISEE"]
+    elif non_centralised_only:
+        worklist = [item for item in worklist if item["procedure"] != "CENTRALISEE"]
+
+    all_centralised = [] if non_centralised_only else get_centralised_specialties(config.postgres, cis=cis)
     ema_index = build_product_information_index(fetch_ema_document_report()) if all_centralised else {}
     selected_by_cis = {item["cis"]: item for item in worklist}
     for specialty in all_centralised:
@@ -751,6 +760,17 @@ Examples:
     semantic_db_parser.add_argument(
         "--batch-size", type=int, default=500, help="Documents per database import batch (default: 500)"
     )
+    semantic_db_source = semantic_db_parser.add_mutually_exclusive_group()
+    semantic_db_source.add_argument(
+        "--centralised-only",
+        action="store_true",
+        help="Process only centrally authorised EMA documents",
+    )
+    semantic_db_source.add_argument(
+        "--non-centralised-only",
+        action="store_true",
+        help="Process only non-centralised ANSM documents",
+    )
 
     # Download HTML files from S3 for local testing
     download_parser = subparsers.add_parser("download-html", help="Download raw HTML files from S3 locally")
@@ -871,6 +891,8 @@ Examples:
                 cis=args.cis,
                 limite=args.limit,
                 batch_size=args.batch_size,
+                centralised_only=args.centralised_only,
+                non_centralised_only=args.non_centralised_only,
             )
         except Exception as e:
             logger.exception(f"Error: {e}")
