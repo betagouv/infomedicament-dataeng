@@ -4,6 +4,15 @@ Data-engineering tools for ANSM's [Info Médicament](https://infomedicament.beta
 
 PostgreSQL `ansm_*` tables are the source of truth for specialties and document URLs. Notice and RCP content is parsed into sanitized semantic HTML and written directly to PostgreSQL. The project no longer uses MySQL, S3-hosted ANSM HTML as a production parsing source, or the legacy tree-shaped document format.
 
+## Features
+
+- [Semantic Notice/RCP import](#database-driven-semantic-import) — import changed ANSM and EMA documents from the PostgreSQL catalog.
+- [ANSM catalog imports](#ansm-catalog-imports) — load Frictionless datapackages and configured data.gouv.fr datasets into PostgreSQL.
+- [Centralised EMA utilities](#centralised-ema-utilities) — cache, inspect, and selectively reprocess EMA product-information PDFs.
+- [Pediatric classification](#pediatric-classification) — classify medicines from semantic RCP content stored in PostgreSQL.
+- [Local semantic parser](#local-semantic-parser) — inspect semantic parser output without database access.
+- [Maintenance utilities](#maintenance-utilities) — download debugging fixtures and convert SQL dumps to CSV.
+
 ## Installation
 
 Install [uv](https://docs.astral.sh/uv/getting-started/installation/), then create the environment:
@@ -121,21 +130,6 @@ Options:
 - `--batch-size`: PostgreSQL streaming batch size; default `500`.
 - `--debug`: write extracted RCP sections 4.1, 4.2, and 4.3 to `debug_sections.jsonl`.
 
-## OpenSearch
-
-The supported indexer builds the main medication search index from PostgreSQL:
-
-```bash
-uv run infomedicament-dataeng index-opensearch specialites
-```
-
-Options:
-
-- `--index`: target index; default `specialites`.
-- `--limite`: cap the number of documents for testing.
-
-The removed `sections` and `notice-chunks` indexers consumed the retired tree-shaped JSONL format and could not index current semantic HTML documents.
-
 ## Maintenance utilities
 
 ### Download HTML for parser debugging
@@ -177,11 +171,6 @@ Use either:
 - `S3_EMA_PDF_PREFIX`
 - `S3_IMAGE_PREFIX`
 
-### OpenSearch
-
-- `SCALINGO_OPENSEARCH_URL` or `OPENSEARCH_URL`
-- `OPENSEARCH_HOST` as a local-development fallback
-
 ### Application
 
 - `CDN_BASE_URL`
@@ -202,10 +191,6 @@ Other useful one-off tasks:
 # Full semantic re-import
 scalingo --app your-app run --size 2XL \
   "python -m infomedicament_dataeng.cli semantic-db-import --full"
-
-# Refresh the medication search index
-scalingo --app your-app run \
-  "python -m infomedicament_dataeng.cli index-opensearch specialites"
 ```
 
 ## Development

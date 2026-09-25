@@ -19,8 +19,6 @@ from .convert import sql_to_csv
 from .datagouv import import_dataset, load_datasets
 from .datapackage_importer import import_datapackage
 from .db import get_glossary_terms, get_semantic_import_worklist, import_semantic_documents, iter_pediatric_rcps
-from .opensearch.specialites import DEFAULT_INDEX as SPECIALITES_DEFAULT_INDEX
-from .opensearch.specialites import index_specialites
 from .parsing import DEFAULT_IMAGE_BASE_URL, parse_semantic_document
 from .s3 import make_s3_client
 
@@ -715,8 +713,6 @@ Examples:
   # Test the semantic parser against local HTML
   infomedicament-dataeng semantic-local ./html_files --limit 10
 
-  # Rebuild the medication search index from PostgreSQL
-  infomedicament-dataeng index-opensearch specialites
         """,
     )
 
@@ -837,17 +833,6 @@ Examples:
         help="Text file of imported PDF slugs; successful PDFs are appended and skipped on re-run",
     )
 
-    # Index into OpenSearch (subcommand group)
-    os_parser = subparsers.add_parser("index-opensearch", help="Index data into OpenSearch")
-    os_subparsers = os_parser.add_subparsers(dest="target", help="Index target")
-
-    # index-opensearch specialites
-    specialites_parser = os_subparsers.add_parser("specialites", help="Index specialités from PostgreSQL")
-    specialites_parser.add_argument(
-        "--index", default=SPECIALITES_DEFAULT_INDEX, help=f"Index name (default: {SPECIALITES_DEFAULT_INDEX})"
-    )
-    specialites_parser.add_argument("--limite", type=int, help="Cap on documents indexed (for testing)")
-
     # Global options
     parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose logging")
 
@@ -862,7 +847,7 @@ Examples:
     )
     # --verbose is for our own code; these libraries log a wall of DEBUG per request.
     if args.verbose:
-        for noisy in ("boto3", "botocore", "s3transfer", "urllib3", "opensearchpy"):
+        for noisy in ("boto3", "botocore", "s3transfer", "urllib3"):
             logging.getLogger(noisy).setLevel(logging.INFO)
 
     if args.command == "semantic-local":
@@ -957,17 +942,6 @@ Examples:
                     batch_size=args.batch_size,
                     processed_file=args.processed_file,
                 )
-            except Exception as e:
-                logger.exception(f"Error: {e}")
-                raise SystemExit(1)
-
-    elif args.command == "index-opensearch":
-        if not getattr(args, "target", None):
-            os_parser.print_help()
-            raise SystemExit(1)
-        if args.target == "specialites":
-            try:
-                index_specialites(index_name=args.index, limite=args.limite)
             except Exception as e:
                 logger.exception(f"Error: {e}")
                 raise SystemExit(1)

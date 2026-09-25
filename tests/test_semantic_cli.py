@@ -11,7 +11,7 @@ import pytest
 from infomedicament_dataeng import cli
 
 
-def test_verbose_pins_opensearchpy_logger(monkeypatch):
+def test_verbose_pins_noisy_dependency_loggers(monkeypatch):
     configured_levels = {}
     get_logger = logging.getLogger
 
@@ -27,8 +27,8 @@ def test_verbose_pins_opensearchpy_logger(monkeypatch):
 
     cli.main()
 
-    assert configured_levels["opensearchpy"] == logging.INFO
-    assert "opensearch" not in configured_levels
+    assert configured_levels["boto3"] == logging.INFO
+    assert configured_levels["urllib3"] == logging.INFO
 
 
 def test_traiter_fichier_semantic_local_returns_render_ready_record(tmp_path):

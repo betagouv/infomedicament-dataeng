@@ -83,34 +83,11 @@ class PostgresConfig:
 
 
 @dataclass
-class OpenSearchConfig:
-    """OpenSearch configuration."""
-
-    url: str  # Full connection URL, may include user:password (e.g. http://user:pass@host:port)
-
-    @classmethod
-    def from_env(cls) -> "OpenSearchConfig":
-        """Load OpenSearch config from environment variables.
-
-        Supports two formats:
-        1. SCALINGO_OPENSEARCH_URL or OPENSEARCH_URL (e.g. http://user:pass@host:port)
-        2. OPENSEARCH_HOST fallback for local dev (default: http://localhost:9200)
-        """
-        url = (
-            os.environ.get("SCALINGO_OPENSEARCH_URL")
-            or os.environ.get("OPENSEARCH_URL")
-            or os.environ.get("OPENSEARCH_HOST", "http://localhost:9200")
-        )
-        return cls(url=url)
-
-
-@dataclass
 class AppConfig:
     """Application configuration."""
 
     s3: S3Config
     postgres: PostgresConfig
-    opensearch: OpenSearchConfig
     cdn_base_url: str
     log_level: str
 
@@ -120,7 +97,6 @@ class AppConfig:
         return cls(
             s3=S3Config.from_env(),
             postgres=PostgresConfig.from_env(),
-            opensearch=OpenSearchConfig.from_env(),
             cdn_base_url=os.environ.get(
                 "CDN_BASE_URL", "https://cellar-c2.services.clever-cloud.com/info-medicaments/exports/images"
             ),
