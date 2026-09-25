@@ -5,7 +5,14 @@ import logging
 import pytest
 
 from infomedicament_dataeng.centralise import acquire
-from infomedicament_dataeng.centralise.acquire import get_ema_pdf, pdf_cache_key
+from infomedicament_dataeng.centralise.acquire import (
+    EMA_DOCUMENT_REPORT_URL,
+    build_french_product_information_index,
+    build_product_information_index,
+    fetch_ema_document_report,
+    get_ema_pdf,
+    pdf_cache_key,
+)
 
 URL = "https://www.ema.europa.eu/fr/documents/product-information/abasaglar-epar-product-information_fr.pdf"
 EXPECTED_KEY = "imports/ema_pdf/abasaglar-epar-product-information_fr.pdf"
@@ -80,6 +87,62 @@ class TestGetEmaPdf:
         assert EXPECTED_KEY in s3.uploads
 
 
+class TestEmaDocumentReport:
+    def test_fetches_fresh_report_from_ema(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(acquire, "_fetch_from_ema", lambda url: calls.append(url) or b'{"data": []}')
+
+        assert fetch_ema_document_report() == {"data": []}
+        assert calls == [EMA_DOCUMENT_REPORT_URL]
+
+    def test_indexes_only_french_product_information(self):
+        report = {
+            "data": [
+                {
+                    "type": "product-information",
+                    "ema_product_number": "EMEA/H/C/002835 ",
+                    "last_updated_date": "2026-01-01T00:00:00Z",
+                    "translations": {"fr": URL},
+                },
+                {
+                    "type": "product-information",
+                    "ema_product_number": "EMEA/H/C/999999",
+                    "translations": {"de": "https://example/de.pdf"},
+                },
+                {
+                    "type": "overview",
+                    "ema_product_number": "EMEA/H/C/000001",
+                    "translations": {"fr": "https://example/overview-fr.pdf"},
+                },
+            ]
+        }
+
+        assert build_french_product_information_index(report) == {
+            "EMEA/H/C/002835": URL,
+            "EMEA/H/C/999999": None,
+        }
+        assert build_product_information_index(report)["EMEA/H/C/002835"] == {
+            "french_url": URL,
+            "last_updated_date": "2026-01-01T00:00:00Z",
+        }
+
+    def test_worklist_reports_missing_french_translation(self, monkeypatch, caplog):
+        from infomedicament_dataeng import cli
+
+        monkeypatch.setattr(acquire, "fetch_ema_document_report", lambda: {"data": []})
+        monkeypatch.setattr(
+            acquire,
+            "build_product_information_index",
+            lambda report: {"EMEA/H/C/999999": {"french_url": None, "last_updated_date": "2026-09-24"}},
+        )
+
+        with caplog.at_level(logging.ERROR, logger=cli.__name__):
+            result = cli._get_ema_worklist([{"cis": "61234567", "denomination": "TEST", "code_ema": "EMEA/H/C/999999"}])
+
+        assert result == {}
+        assert "French EMA product-information translation missing for CIS 61234567" in caplog.text
+
+
 def _doc(denom, tag):
     return {
         "denomination": denom,
@@ -136,7 +199,12 @@ class TestParseFanOut:
         monkeypatch.setattr(cli, "make_s3_client", lambda: object())
         monkeypatch.setattr(cli, "get_glossary_terms", lambda config: ["solution"])
         monkeypatch.setattr(acq, "get_ema_pdf", get_cached_pdf)
-        monkeypatch.setattr(db, "get_centralised_worklist", lambda cis=None: worklist)
+        specialties = [
+            {"cis": cis, "denomination": denomination, "code_ema": "EMEA/H/C/002835"}
+            for cis, denomination in worklist[URL]
+        ]
+        monkeypatch.setattr(db, "get_centralised_specialties", lambda config, cis=None: specialties)
+        monkeypatch.setattr(cli, "_get_ema_worklist", lambda rows: {URL: rows})
         monkeypatch.setattr(parser, "parse_pdf", lambda b, **kwargs: parsed)
         imports = []
         monkeypatch.setattr(

@@ -2,6 +2,7 @@
 
 import json
 import logging
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -290,3 +291,50 @@ def test_db_import_auto_detects_semantic_centralise_records(monkeypatch, caplog)
     assert legacy_calls == []
     assert sequence_checks == []
     assert "inserts will fail" not in caplog.text
+
+
+def test_semantic_import_worklist_groups_documents_and_passes_cutoff(monkeypatch):
+    cutoff = datetime(2026, 9, 23, tzinfo=timezone.utc)
+    rows = [
+        {
+            "cis": "1",
+            "denomination": "TEST",
+            "procedure": "NATIONALE",
+            "code_ema": None,
+            "document_type": "notice",
+            "url": "https://example/N1.htm",
+        },
+        {
+            "cis": "1",
+            "denomination": "TEST",
+            "procedure": "NATIONALE",
+            "code_ema": None,
+            "document_type": "rcp",
+            "url": "https://example/R1.htm",
+        },
+    ]
+
+    class Result:
+        def mappings(self):
+            return rows
+
+    connection = MagicMock()
+    connection.execute.return_value = Result()
+    engine = MagicMock()
+    engine.connect.return_value.__enter__.return_value = connection
+    monkeypatch.setattr(db, "get_postgres_engine", lambda config: engine)
+
+    result = db.get_semantic_import_worklist(cutoff, "config", cis="1", limit=10)
+
+    assert result == [
+        {
+            "cis": "1",
+            "denomination": "TEST",
+            "procedure": "NATIONALE",
+            "code_ema": "",
+            "documents": {"notice": "https://example/N1.htm", "rcp": "https://example/R1.htm"},
+        }
+    ]
+    assert connection.execute.call_args.args[1] == {"since": cutoff, "cis": "1", "limit": 10}
+    assert "s.date_modification" not in str(connection.execute.call_args.args[0])
+    assert "changed.date_modification >= :since" in str(connection.execute.call_args.args[0])

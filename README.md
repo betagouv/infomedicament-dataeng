@@ -102,6 +102,35 @@ the command. Terms whose `ref_glossaire.a_souligner` value is true are wrapped
 as `<span data-definition="Canonical glossary name">…</span>` so the frontend
 can attach an interactive definition UI.
 
+#### Database-driven semantic import
+
+Use the PostgreSQL `ansm_specialite` catalog as the starting point, then import
+each selected specialty's Notice and RCP. Non-centralised documents are downloaded
+directly from their HTTPS `ansm_document.url`; relative image URLs are resolved
+against that document location.
+Centralised specialties use the existing EMA download/S3 cache and PDF parser.
+
+```bash
+# Default delta: specialty or document changed during the last 24 hours
+uv run infomedicament-dataeng semantic-db-import
+
+# Explicit cutoff (an ISO date or datetime)
+uv run infomedicament-dataeng semantic-db-import --since 2026-09-20T08:00:00+00:00
+
+# Full re-import
+uv run infomedicament-dataeng semantic-db-import --full
+
+# Targeted test
+uv run infomedicament-dataeng semantic-db-import --cis 61234567 --full --limit 1
+```
+
+`--since` and `--full` are mutually exclusive. A specialty is selected when one
+of its `ansm_document.date_modification` values reaches the cutoff. Centralised
+specialties are selected when the EMA product-information record's
+`last_updated_date` reaches the cutoff. `ansm_specialite.date_modification` does
+not trigger document parsing. Imports are flushed to PostgreSQL every 500
+documents by default; adjust this with `--batch-size`.
+
 #### Legacy S3 Mode (deprecated)
 
 Process HTML files from S3 (Clever Cloud Cellar) and write results back to S3:
@@ -142,7 +171,7 @@ attributes, section IDs, safe tables and images, and glossary annotations.
 Two things make these PDFs different:
 
 - **One PDF bundles several presentations.** A PDF often contains one SmPC + Notice per device
-  (cartouche, pen…) or per dosage (5/10/15/20 mg), and the several CIS that share one `UrlEpar` are
+  (cartouche, pen…) or per dosage (5/10/15/20 mg), and the several CIS that share one EMA product are
   one-per-presentation — so content genuinely differs per CIS. The parser extracts *all*
   presentations and matches each CIS to its own by Jaccard token-overlap of the PDF denomination
   against the CIS's `SpecDenom01`. A CIS with an empty `SpecDenom01` that can't be disambiguated is
@@ -150,7 +179,10 @@ Two things make these PDFs different:
 - **They must be acquired, not just read.** PDFs are scraped from EMA once and cached forever on S3
   (under `S3_EMA_PDF_PREFIX`, with a `.sha256` sidecar); re-runs serve from cache unless `--refresh`.
 
-The worklist comes from the PDBM database (`VUEmaEpar` LEFT JOIN `Specialite`).
+The worklist comes from PostgreSQL `ansm_specialite`. On every command run, the
+current EMA EPAR document report is downloaded and `code_ema` is matched to its
+`product-information` record. Only `translations.fr` is accepted; a missing
+French translation is reported and that specialty is skipped.
 
 #### 1. Fetch — cache PDFs on S3
 

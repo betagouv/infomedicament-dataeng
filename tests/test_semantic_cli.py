@@ -3,6 +3,7 @@
 import json
 import logging
 import sys
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -217,5 +218,136 @@ def test_main_routes_semantic_s3_import_arguments(monkeypatch):
             "staging": True,
             "image_base_url": "https://cdn.example.test/assets/",
             "cis": "67654321",
+        }
+    ]
+
+
+def test_import_semantic_documents_from_db_reads_selected_document_urls(monkeypatch):
+    cutoff = datetime(2026, 9, 23, 12, tzinfo=timezone.utc)
+    worklist = [
+        {
+            "cis": "61234567",
+            "denomination": "MEDICAMENT TEST",
+            "procedure": "NATIONALE",
+            "documents": {
+                "notice": "https://ansm.example/documents/N0000001.htm",
+                "rcp": "https://ansm.example/documents/R0000001.htm",
+            },
+        }
+    ]
+
+    class FakeS3Client:
+        pass
+
+    client = FakeS3Client()
+    config = SimpleNamespace(
+        postgres="postgres-config",
+        s3=SimpleNamespace(notice_prefix="imports/notice/", rcp_prefix="imports/rcp/"),
+    )
+    worklist_calls = []
+    downloads = []
+    imports = []
+    monkeypatch.setattr(cli, "get_config", lambda: config)
+    monkeypatch.setattr(cli, "make_s3_client", lambda: client)
+    monkeypatch.setattr(cli, "get_glossary_terms", lambda config: [])
+    monkeypatch.setattr(
+        cli,
+        "_download_document",
+        lambda url: downloads.append(url) or b'<p class="AmmDenomination">TEST</p><p class="AmmCorpsTexte">Body</p>',
+    )
+    monkeypatch.setattr(
+        cli,
+        "get_semantic_import_worklist",
+        lambda since, config, cis, limit: worklist_calls.append((since, config, cis, limit)) or worklist,
+    )
+    monkeypatch.setattr("infomedicament_dataeng.db.get_centralised_specialties", lambda config, cis=None: [])
+    monkeypatch.setattr(
+        cli,
+        "import_semantic_documents",
+        lambda records, table, config: imports.append((table, list(records))) or (len(records), 0),
+    )
+
+    cli.import_semantic_documents_from_db(since=cutoff, cis="61234567", limite=1)
+
+    assert worklist_calls == [(cutoff, "postgres-config", "61234567", None)]
+    assert downloads == [
+        "https://ansm.example/documents/N0000001.htm",
+        "https://ansm.example/documents/R0000001.htm",
+    ]
+    assert [table for table, _ in imports] == ["rcp", "notices"]
+    assert imports[0][1][0]["cis"] == "61234567"
+    assert imports[1][1][0]["filename"] == "N0000001.htm"
+
+
+def test_download_document_rejects_non_https_url():
+    with pytest.raises(ValueError, match="must be an HTTPS URL"):
+        cli._download_document("http://annexes.example/notice.html")
+
+
+def test_document_image_base_url_uses_export_image_root():
+    assert (
+        cli._document_image_base_url("https://annexes.example/notice/20/60003620.html")
+        == "https://annexes.example/images/"
+    )
+
+
+def test_ema_document_updated_since_uses_report_timestamp():
+    cutoff = datetime(2026, 9, 23, 12, tzinfo=timezone.utc)
+
+    assert cli._ema_document_updated_since({"last_updated_date": "2026-09-23T12:00:00Z"}, cutoff)
+    assert not cli._ema_document_updated_since({"last_updated_date": "2026-09-23T11:59:59Z"}, cutoff)
+
+
+def test_db_import_selects_centralised_specialty_updated_only_at_ema(monkeypatch):
+    from infomedicament_dataeng.centralise import acquire
+
+    cutoff = datetime(2026, 9, 23, 12, tzinfo=timezone.utc)
+    specialty = {
+        "cis": "61234567",
+        "denomination": "EMA TEST",
+        "code_ema": "EMEA/H/C/009999",
+    }
+    ema_index = {
+        "EMEA/H/C/009999": {
+            "french_url": "https://ema.example/product-information_fr.pdf",
+            "last_updated_date": "2026-09-24T08:00:00Z",
+        }
+    }
+    selected = []
+    config = SimpleNamespace(postgres="postgres-config")
+    monkeypatch.setattr(cli, "get_config", lambda: config)
+    monkeypatch.setattr(cli, "get_semantic_import_worklist", lambda *args, **kwargs: [])
+    monkeypatch.setattr("infomedicament_dataeng.db.get_centralised_specialties", lambda config, cis=None: [specialty])
+    monkeypatch.setattr(acquire, "fetch_ema_document_report", lambda: {"data": []})
+    monkeypatch.setattr(acquire, "build_product_information_index", lambda report: ema_index)
+    monkeypatch.setattr(cli, "_get_ema_worklist", lambda specialties, index: selected.extend(specialties) or {})
+    monkeypatch.setattr(cli, "make_s3_client", lambda: object())
+    monkeypatch.setattr(cli, "get_glossary_terms", lambda config: [])
+    monkeypatch.setattr(cli, "import_semantic_documents", lambda records, table, config: (0, 0))
+
+    cli.import_semantic_documents_from_db(since=cutoff)
+
+    assert selected == [{**specialty, "procedure": "CENTRALISEE", "documents": {}}]
+
+
+def test_main_routes_semantic_db_full_import(monkeypatch):
+    calls = []
+    monkeypatch.setattr(cli, "get_config", lambda: SimpleNamespace(log_level="INFO"))
+    monkeypatch.setattr(cli, "import_semantic_documents_from_db", lambda **kwargs: calls.append(kwargs))
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["infomedicament-dataeng", "semantic-db-import", "--full", "--cis", "61234567", "--limit", "1"],
+    )
+
+    cli.main()
+
+    assert calls == [
+        {
+            "since": None,
+            "full": True,
+            "cis": "61234567",
+            "limite": 1,
+            "batch_size": 500,
         }
     ]
