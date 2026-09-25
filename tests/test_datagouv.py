@@ -183,8 +183,9 @@ class TestImportDataset:
 
     def test_ignores_surplus_trailing_empty_csv_field(self, sample_dataset: DataGouvDataset):
         mock_engine_patch, mock_engine, mock_conn = self._mock_engine()
-        with mock_engine_patch, patch(
-            "infomedicament_dataeng.datagouv.importer.fetch_csv", return_value=[["val1", "val2", "val3", ""]]
+        with (
+            mock_engine_patch,
+            patch("infomedicament_dataeng.datagouv.importer.fetch_csv", return_value=[["val1", "val2", "val3", ""]]),
         ):
             count = import_dataset(sample_dataset)
 
