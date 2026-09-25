@@ -15,7 +15,7 @@ from typing import Iterable
 import fitz
 
 from ..config import get_config
-from ..opensearch.sections import _NOTICE_NUMBER_TO_ANCHOR, _RCP_NUMBER_TO_ANCHOR
+from ..parsing.anchors import NOTICE_NUMBER_TO_ANCHOR, RCP_NUMBER_TO_ANCHOR
 from ..parsing.semantic_parser import finalize_semantic_html
 from .extract import Image, Table, TextLine, TextRun, extract_elements
 
@@ -152,7 +152,7 @@ class _SemanticHtmlBuilder:
         self._in_indication = self.kind == "notice" and number == "1"
 
     def _anchor(self, number: str) -> str | None:
-        table = _RCP_NUMBER_TO_ANCHOR if self.kind == "rcp" else _NOTICE_NUMBER_TO_ANCHOR
+        table = RCP_NUMBER_TO_ANCHOR if self.kind == "rcp" else NOTICE_NUMBER_TO_ANCHOR
         return table.get(number)
 
     def _try_heading(self, text: str) -> bool:
@@ -161,16 +161,16 @@ class _SemanticHtmlBuilder:
             return True
         if self.kind == "rcp":
             m2 = _RCP_L2.match(text)
-            if m2 and m2.group(1) in _RCP_NUMBER_TO_ANCHOR:
+            if m2 and m2.group(1) in RCP_NUMBER_TO_ANCHOR:
                 self._append_heading("h3", text, m2.group(1))
                 return True
             m1 = _RCP_L1.match(text)
-            if m1 and m1.group(1) in _RCP_NUMBER_TO_ANCHOR:
+            if m1 and m1.group(1) in RCP_NUMBER_TO_ANCHOR:
                 self._append_heading("h2", text, m1.group(1))
                 return True
         else:
             m = _NOTICE_L1.match(text)
-            if m and m.group(1) in _NOTICE_NUMBER_TO_ANCHOR:
+            if m and m.group(1) in NOTICE_NUMBER_TO_ANCHOR:
                 self._append_heading("h3", text, m.group(1))
                 return True
         return False

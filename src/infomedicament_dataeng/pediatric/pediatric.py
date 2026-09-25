@@ -14,59 +14,57 @@ import csv
 import re
 from dataclasses import dataclass, field
 
+from bs4 import BeautifulSoup, Tag
+
 from . import config as pediatric_config
 
 # --- Section extraction ---
 
+_SECTION_ANCHORS = {
+    "4.1": "RcpIndicTherap",
+    "4.2": "RcpPosoAdmin",
+    "4.3": "RcpContreindications",
+}
 
-def extract_section_texts(rcp_json: dict, section_prefix: str) -> list[str]:
-    """Extract all text blocks from an RCP section.
+
+def extract_section_texts(content_html: str, section_prefix: str) -> list[str]:
+    """Extract text blocks from one semantic RCP section.
 
     Args:
-        rcp_json: Parsed RCP JSON (with "content" key).
+        content_html: Sanitized semantic HTML stored in PostgreSQL.
         section_prefix: Section number prefix, e.g. "4.1", "4.2", "4.3".
 
     Returns:
         List of text strings, one per text element found in the section.
     """
+    anchor = _SECTION_ANCHORS.get(section_prefix)
+    if not anchor or not content_html:
+        return []
+
+    soup = BeautifulSoup(content_html, "html.parser")
+    heading = soup.find(id=anchor)
+    if not isinstance(heading, Tag) or not re.fullmatch(r"h[1-6]", heading.name or ""):
+        return []
+
+    heading_level = int(heading.name[1])
     texts: list[str] = []
-    for item in rcp_json.get("content", []):
-        # Look only for AmmAnnexeTitre1 nodes (level 1 sections)
-        if item.get("type") != "AmmAnnexeTitre1":
+    for sibling in heading.next_siblings:
+        if not isinstance(sibling, Tag):
             continue
-        for child in item.get("children", []):
-            if child.get("type") == "AmmAnnexeTitre2":
-                heading = child.get("content", "").strip()
-                if heading.startswith(section_prefix):
-                    _collect_texts(child, texts)
-                    return texts
+        if re.fullmatch(r"h[1-6]", sibling.name or ""):
+            level = int(sibling.name[1])
+            if level <= heading_level:
+                break
+            text = sibling.get_text(" ", strip=True)
+            if text and text.lower() not in pediatric_config._HEADING_ONLY_TITLES:
+                texts.append(text)
+            continue
+        if sibling.name in {"script", "style"}:
+            continue
+        text = sibling.get_text(" ", strip=True)
+        if text:
+            texts.append(text)
     return texts
-
-
-def _collect_texts(node: dict, texts: list[str]) -> None:
-    """Recursively collect text content from a JSON node."""
-    content = node.get("content", "")
-    node_type = node.get("type", "")
-
-    # Skip the section heading itself (AmmAnnexeTitre2)
-    if node_type == "AmmAnnexeTitre2":
-        pass
-    elif node_type in ("AmmAnnexeTitre3", "AmmAnnexeTitre4"):
-        # Include subsection titles only if they carry clinical info
-        # (e.g. "Réservé au nourrisson et à l'enfant de plus de 3 mois")
-        # Skip generic structural headings
-        if isinstance(content, str) and content.strip().lower() not in pediatric_config._HEADING_ONLY_TITLES:
-            texts.append(content.strip())
-    elif isinstance(content, str) and content.strip():
-        texts.append(content.strip())
-    elif isinstance(content, list):
-        # Bullet list items
-        for item in content:
-            if isinstance(item, str) and item.strip():
-                texts.append(item.strip())
-
-    for child in node.get("children", []):
-        _collect_texts(child, texts)
 
 
 # --- Classification ---
@@ -139,23 +137,22 @@ class PediatricClassification:
     matches_43: list[SentenceMatch] = field(default_factory=list)
 
 
-def classify(rcp_json: dict, atc_code: str = "") -> PediatricClassification:
-    """Classify a drug for pediatric use based on its parsed RCP.
+def classify(cis: str, content_html: str, atc_code: str = "") -> PediatricClassification:
+    """Classify a drug for pediatric use based on its semantic RCP HTML.
 
     Args:
-        rcp_json: Parsed RCP JSON (with "source" and "content" keys).
+        cis: Medicine CIS code.
+        content_html: Sanitized semantic HTML stored in ``rcp.content_html``.
         atc_code: ATC code of the drug (e.g. "G03AA07").
 
     Returns:
         PediatricClassification with conditions A, B, C and matched evidence.
     """
-    source = rcp_json.get("source", {})
-    cis = source.get("cis", "") if isinstance(source, dict) else ""
-    result = PediatricClassification(cis=cis)
+    result = PediatricClassification(cis=str(cis))
 
     # --- Sections 4.1 + 4.2: Indication / Sur avis ---
-    texts_41 = extract_section_texts(rcp_json, "4.1")
-    texts_42 = extract_section_texts(rcp_json, "4.2")
+    texts_41 = extract_section_texts(content_html, "4.1")
+    texts_42 = extract_section_texts(content_html, "4.2")
     texts_41_42 = texts_41 + texts_42
 
     has_any_keyword = False
@@ -212,7 +209,7 @@ def classify(rcp_json: dict, atc_code: str = "") -> PediatricClassification:
     result.condition_c = len(result.c_reasons) > 0
 
     # --- Section 4.3: Contre-indications ---
-    texts_43 = extract_section_texts(rcp_json, "4.3")
+    texts_43 = extract_section_texts(content_html, "4.3")
     for text in texts_43:
         keywords = find_pediatric_keywords_in_text(text)
         if keywords:

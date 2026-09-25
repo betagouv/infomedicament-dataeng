@@ -1,1 +1,0 @@
-"""OpenSearch ETL utilities."""

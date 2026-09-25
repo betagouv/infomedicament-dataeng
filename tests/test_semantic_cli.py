@@ -11,7 +11,7 @@ import pytest
 from infomedicament_dataeng import cli
 
 
-def test_verbose_pins_opensearchpy_logger(monkeypatch):
+def test_verbose_pins_noisy_dependency_loggers(monkeypatch):
     configured_levels = {}
     get_logger = logging.getLogger
 
@@ -27,8 +27,8 @@ def test_verbose_pins_opensearchpy_logger(monkeypatch):
 
     cli.main()
 
-    assert configured_levels["opensearchpy"] == logging.INFO
-    assert "opensearch" not in configured_levels
+    assert configured_levels["boto3"] == logging.INFO
+    assert configured_levels["urllib3"] == logging.INFO
 
 
 def test_traiter_fichier_semantic_local_returns_render_ready_record(tmp_path):
@@ -107,119 +107,6 @@ def test_traiter_dossier_semantic_local_loads_notice_and_rcp_files(tmp_path):
     records = [json.loads(line) for line in output.read_text(encoding="utf-8").splitlines()]
     assert [record["source"]["filename"] for record in records] == ["N0000001.htm", "R0000001.htm"]
     assert all("title" not in record for record in records)
-
-
-@pytest.mark.parametrize(
-    ("pattern", "key", "filename", "cis", "table"),
-    [
-        ("N", "imports/notice/staging/N0000001.htm", "N0000001.htm", "61234567", "notices"),
-        ("R", "imports/rcp/staging/R0000001.htm", "R0000001.htm", "67654321", "rcp"),
-    ],
-)
-def test_import_semantic_documents_from_staging_does_not_move_sources(monkeypatch, pattern, key, filename, cis, table):
-    class FakeS3Client:
-        def list_staging_html_files(self, requested_pattern):
-            assert requested_pattern == pattern
-            return iter([key])
-
-        def download_file_content(self, requested_key):
-            assert requested_key == key
-            return (
-                b'<p class="DateNotif">Mis a jour le : 17/07/2026</p>'
-                b'<p class="AmmDenomination">NOTICE TEST</p><p class="AmmCorpsTexte">Body</p>'
-            )
-
-    imported = []
-    client = FakeS3Client()
-    monkeypatch.setattr(cli, "make_s3_client", lambda: client)
-    monkeypatch.setattr(cli, "get_config", lambda: SimpleNamespace(postgres="postgres-config"))
-    monkeypatch.setattr(cli, "get_authorized_cis", lambda: {cis})
-    monkeypatch.setattr(cli, "get_filename_to_cis_mapping", lambda: {filename: int(cis)})
-    monkeypatch.setattr(cli, "get_glossary_terms", lambda config: ["Body"])
-
-    def capture_import(records, selected_table, config):
-        imported.extend(records)
-        assert selected_table == table
-        assert config == "postgres-config"
-        return len(imported), 0
-
-    monkeypatch.setattr(cli, "import_semantic_documents", capture_import)
-
-    cli.import_semantic_documents_from_s3(pattern=pattern, staging=True)
-
-    assert imported[0]["cis"] == cis
-    assert imported[0]["filename"] == filename
-    assert imported[0]["date_notif"] == "2026-07-17"
-    assert imported[0]["indication"] is None
-    assert "<p" in imported[0]["content_html"]
-    assert '<span data-definition="Body">Body</span>' in imported[0]["content_html"]
-
-
-def test_import_semantic_documents_from_s3_can_target_one_cis(monkeypatch):
-    class FakeS3Client:
-        def list_html_files(self, requested_pattern):
-            assert requested_pattern == "N"
-            return iter(["imports/notice/N0000001.htm", "imports/notice/N0000002.htm"])
-
-        def download_file_content(self, requested_key):
-            assert requested_key == "imports/notice/N0000002.htm"
-            return b'<p class="AmmDenomination">TARGET NOTICE</p><p class="AmmCorpsTexte">Body</p>'
-
-    imported = []
-    monkeypatch.setattr(cli, "make_s3_client", FakeS3Client)
-    monkeypatch.setattr(cli, "get_config", lambda: SimpleNamespace(postgres="postgres-config"))
-    monkeypatch.setattr(cli, "get_authorized_cis", lambda: {"61234567", "67654321"})
-    monkeypatch.setattr(
-        cli,
-        "get_filename_to_cis_mapping",
-        lambda: {"N0000001.htm": 61234567, "N0000002.htm": 67654321},
-    )
-    monkeypatch.setattr(cli, "get_glossary_terms", lambda config: [])
-
-    def capture_import(records, table, config):
-        imported.extend(records)
-        return len(imported), 0
-
-    monkeypatch.setattr(cli, "import_semantic_documents", capture_import)
-
-    cli.import_semantic_documents_from_s3(pattern="N", cis="67654321")
-
-    assert [record["cis"] for record in imported] == ["67654321"]
-
-
-def test_main_routes_semantic_s3_import_arguments(monkeypatch):
-    calls = []
-    monkeypatch.setattr(cli, "get_config", lambda: SimpleNamespace(log_level="INFO"))
-    monkeypatch.setattr(cli, "import_semantic_documents_from_s3", lambda **kwargs: calls.append(kwargs))
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "infomedicament-dataeng",
-            "semantic-s3-import",
-            "--pattern",
-            "R",
-            "--cis",
-            "67654321",
-            "--staging",
-            "--limit",
-            "2",
-            "--image-base-url",
-            "https://cdn.example.test/assets/",
-        ],
-    )
-
-    cli.main()
-
-    assert calls == [
-        {
-            "pattern": "R",
-            "limite": 2,
-            "staging": True,
-            "image_base_url": "https://cdn.example.test/assets/",
-            "cis": "67654321",
-        }
-    ]
 
 
 def test_import_semantic_documents_from_db_reads_selected_document_urls(monkeypatch):
@@ -351,3 +238,43 @@ def test_main_routes_semantic_db_full_import(monkeypatch):
             "batch_size": 500,
         }
     ]
+
+
+def test_main_routes_pediatric_classification_from_postgres(monkeypatch, tmp_path):
+    output = tmp_path / "predictions.csv"
+    records = iter([{"cis": "61234567", "content_html": "<p>RCP</p>", "atc_code": "A01"}])
+    iterator_calls = []
+    runner_calls = []
+    monkeypatch.setattr(cli, "get_config", lambda: SimpleNamespace(log_level="INFO", postgres="postgres-config"))
+    monkeypatch.setattr(
+        cli,
+        "iter_pediatric_rcps",
+        lambda config, **kwargs: iterator_calls.append((config, kwargs)) or records,
+    )
+    monkeypatch.setattr(
+        cli,
+        "run_pediatric_classification",
+        lambda selected, truth, output_path, debug: runner_calls.append((selected, truth, output_path, debug)),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "infomedicament-dataeng",
+            "classify-pediatric",
+            "--cis",
+            "61234567",
+            "--limit",
+            "10",
+            "--batch-size",
+            "25",
+            "--output",
+            str(output),
+            "--debug",
+        ],
+    )
+
+    cli.main()
+
+    assert iterator_calls == [("postgres-config", {"cis": "61234567", "limit": 10, "batch_size": 25})]
+    assert runner_calls == [(records, None, str(output), True)]
