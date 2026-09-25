@@ -484,6 +484,43 @@ if the resource UUID changes.
 
 The table must be created first via a Kysely migration in the [`infomedicament`](https://github.com/betagouv/infomed) NextJS project.
 
+### Import BDPM presentation prices
+
+Download the current presentation file from the Base de Données Publique des Médicaments and replace the contents of `ceps_price`:
+
+```bash
+uv run infomedicament-dataeng import-ceps-prices
+```
+
+The command validates the complete download before opening a database transaction, then truncates and reloads the table atomically. Prices are stored as integer cents. Create the `ceps_price` table in `infomedicament` with these fields:
+
+| Field | PostgreSQL type |
+| --- | --- |
+| `cip` | `text` |
+| `reimbursement_rates` | `smallint[]` |
+| `medicine_price_cents` | `integer` |
+| `public_price_cents` | `integer` |
+| `dispensing_fee_cents` | `integer` |
+
+`cip` is the CIP13 presentation identifier and joins to `ansm_presentation.cip`. `reimbursement_rates` is an array because the source format permits multiple rates for one presentation. The price columns are independently nullable because the source can publish incomplete price information; `dispensing_fee_cents` contains the published *honoraires de dispensation*.
+
+### Import CNAM agrément aux collectivités
+
+Download the current presentation file and replace the contents of `cnam_agrement_collectivite`:
+
+```bash
+uv run infomedicament-dataeng import-cnam-agrement-collectivite
+```
+
+Create the table in `infomedicament` with these fields:
+
+| Field | PostgreSQL type |
+| --- | --- |
+| `cip` | `text` |
+| `agrement_collectivite` | `boolean` |
+
+`cip` joins to `ansm_presentation.cip`. `agrement_collectivite` is `true` for `oui`, `false` for `non`, and `NULL` for the `inconnu` value permitted by the source format.
+
 ## Delta workflow (monthly updates)
 
 When only a small number of new or updated HTML files arrive, avoid reprocessing everything:
