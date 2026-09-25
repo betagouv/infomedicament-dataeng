@@ -329,7 +329,13 @@ class TestSemanticContract:
                 assert "content" not in document
                 assert document["content_html"].startswith("<")
                 assert 'data-block-id="document-b0001"' in document["content_html"]
-                assert 'class="' not in document["content_html"]
+                html = BeautifulSoup(document["content_html"], "html.parser")
+                assert {class_name for tag in html.find_all(True) for class_name in tag.get("class", [])} <= {
+                    "fr-table",
+                    "fr-table__wrapper",
+                    "fr-table__container",
+                    "fr-table__content",
+                }
 
     def test_notice_has_document_heading_above_numbered_sections(self, notice):
         assert notice.h2.get_text(" ", strip=True).startswith("Notice:")

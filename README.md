@@ -38,6 +38,13 @@ uv run infomedicament-dataeng semantic-db-import \
 # Re-import the full catalog
 uv run infomedicament-dataeng semantic-db-import --full
 
+# Re-import only non-centralised ANSM documents
+uv run infomedicament-dataeng semantic-db-import \
+  --full --non-centralised-only
+
+# Import only centralised EMA documents changed during the last 24 hours
+uv run infomedicament-dataeng semantic-db-import --centralised-only
+
 # Target one specialty
 uv run infomedicament-dataeng semantic-db-import \
   --cis 61234567 --full --limit 1
@@ -50,6 +57,10 @@ Options:
 - `--cis`: restrict processing to one CIS code.
 - `--limit`: cap the number of selected specialties.
 - `--batch-size`: number of documents written per PostgreSQL batch; default `500`.
+- `--centralised-only`: process only centrally authorised documents sourced from EMA.
+- `--non-centralised-only`: process only non-centralised documents sourced from ANSM.
+
+`--centralised-only` and `--non-centralised-only` are mutually exclusive. Either flag can be combined with `--full`, `--since`, `--cis`, `--limit`, and `--batch-size`.
 
 The importer writes semantic HTML to `notices.content_html` and `rcp.content_html`. Notice indications also update `specialites_metadata.description`. Glossary terms marked with `ref_glossaire.a_souligner` are annotated in the generated HTML.
 
