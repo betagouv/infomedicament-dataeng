@@ -303,6 +303,7 @@ def test_parse_semantic_document_recognizes_list_families_and_nesting():
     <p class="MsoListParagraphCxSpLast">Word bullet</p>
     <p class="MsoListParagraph">o plain o marker</p>
     <p class="MsoListParagraph"><span>o </span>inline o marker</p>
+    <p class="MsoListParagraph"><span>o</span> split o marker</p>
     <ul><li>o native o marker</li></ul>
     """
 
@@ -316,6 +317,7 @@ def test_parse_semantic_document_recognizes_list_families_and_nesting():
         "Word bullet",
         "plain o marker",
         "inline o marker",
+        "split o marker",
     ]
     assert [item.get_text(strip=True) for item in root_list.find("ul").find_all("li", recursive=False)] == [
         "nested",

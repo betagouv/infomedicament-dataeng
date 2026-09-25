@@ -517,13 +517,24 @@ def _strip_o_bullet_markers(root: Tag) -> None:
 
 
 def _strip_o_bullet_marker(tag: Tag) -> None:
-    for text_node in tag.find_all(string=True):
-        text = str(text_node)
-        if not text.strip():
-            continue
-        if match := re.match(r"^\s*o[ \t\u00a0]+", text):
-            text_node.replace_with(text[match.end() :])
-        break
+    text_nodes = list(tag.find_all(string=True))
+    prefix = ""
+    for text_node in text_nodes:
+        prefix += str(text_node)
+        match = re.match(r"^\s*o[ \t\u00a0]+", prefix)
+        if match:
+            remaining = match.end()
+            for marker_node in text_nodes:
+                marker_text = str(marker_node)
+                if remaining >= len(marker_text):
+                    remaining -= len(marker_text)
+                    marker_node.extract()
+                else:
+                    marker_node.replace_with(marker_text[remaining:])
+                    break
+            return
+        if not re.fullmatch(r"\s*o?", prefix):
+            return
 
 
 def _remove_empty_blocks(root: Tag) -> None:
