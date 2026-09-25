@@ -18,7 +18,10 @@ from bs4 import BeautifulSoup, NavigableString, Tag
 
 ADDRESSABLE_TAGS = {"h2", "h3", "h4", "h5", "h6", "p", "blockquote", "ul", "ol", "li", "table", "figure", "img"}
 DEFAULT_IMAGE_BASE_URL = "https://cellar-c2.services.clever-cloud.com/info-medicaments/exports/images/"
+ALERT_STYLE = "border:solid windowtext 1.0pt;padding:1.0pt 1.0pt 1.0pt 1.0pt"
+DSFR_DIV_CLASSES = {"fr-alert", "fr-table", "fr-table__wrapper", "fr-table__container", "fr-table__content"}
 ALLOWED_TAGS = {
+    "div",
     "p",
     "h2",
     "h3",
@@ -92,6 +95,7 @@ def parse_semantic_document(
     date_notif = _extract_date(root)
     _remove_metadata_blocks(root)
     _remove_source_noise(root)
+    _convert_alerts(root)
     _convert_lists(root)
     indication_blocks = _find_indication_blocks(root)
     indication = _extract_indication(indication_blocks)
@@ -140,8 +144,10 @@ def _finalize_semantic_root(
 ) -> SemanticDocument:
     """Apply the normalization shared by legacy and already-semantic inputs."""
     _sanitize(root, image_base_url=image_base_url, preserve_block_ids=False)
+    _strip_o_bullet_markers(root)
     _annotate_glossary_terms(root, glossary_terms)
     _remove_empty_blocks(root)
+    _wrap_tables(root)
     _assign_block_ids(root)
     _sanitize(root, image_base_url=image_base_url, preserve_block_ids=True)
     _compact_whitespace(root)
@@ -399,6 +405,12 @@ def _remove_source_noise(root: Tag) -> None:
             tag.decompose()
 
 
+def _convert_alerts(root: Tag) -> None:
+    for tag in root.find_all("div"):
+        if tag.get("style", "").strip().rstrip(";").casefold() == ALERT_STYLE:
+            tag["class"] = ["fr-alert"]
+
+
 def _remove_metadata_blocks(root: Tag) -> None:
     """Remove metadata blocks after their values have been extracted."""
     for tag in list(root.find_all(True)):
@@ -499,6 +511,21 @@ def _remove_bullet_marker(tag: Tag) -> None:
         first.decompose()
 
 
+def _strip_o_bullet_markers(root: Tag) -> None:
+    for item in root.find_all("li"):
+        _strip_o_bullet_marker(item)
+
+
+def _strip_o_bullet_marker(tag: Tag) -> None:
+    for text_node in tag.find_all(string=True):
+        text = str(text_node)
+        if not text.strip():
+            continue
+        if match := re.match(r"^\s*o[ \t\u00a0]+", text):
+            text_node.replace_with(text[match.end() :])
+        break
+
+
 def _remove_empty_blocks(root: Tag) -> None:
     for tag in reversed(root.find_all(["strong", "em", "u", "sup", "sub"])):
         if not tag.get_text(strip=True) and not tag.find("img"):
@@ -515,6 +542,22 @@ def _remove_empty_blocks(root: Tag) -> None:
     for tag in reversed(root.find_all(empty_candidate_tags)):
         if not tag.get_text(strip=True) and not tag.find("img"):
             tag.decompose()
+
+
+def _wrap_tables(root: Tag) -> None:
+    for table in root.find_all("table"):
+        parent = table.parent
+        if isinstance(parent, Tag) and "fr-table__content" in parent.get("class", []):
+            continue
+
+        content = BeautifulSoup("", "html.parser").new_tag("div", attrs={"class": "fr-table__content"})
+        container = BeautifulSoup("", "html.parser").new_tag("div", attrs={"class": "fr-table__container"})
+        wrapper = BeautifulSoup("", "html.parser").new_tag("div", attrs={"class": "fr-table__wrapper"})
+        outer = BeautifulSoup("", "html.parser").new_tag("div", attrs={"class": "fr-table"})
+        table.wrap(content)
+        content.wrap(container)
+        container.wrap(wrapper)
+        wrapper.wrap(outer)
 
 
 def _compact_whitespace(root: Tag) -> None:
@@ -566,6 +609,7 @@ def _sanitize(root: Tag, *, image_base_url: str, preserve_block_ids: bool) -> No
             tag.unwrap()
 
     allowed_attributes = {
+        "div": {"class"},
         "p": {"data-document-date", "data-document-role"},
         "h2": {"data-document-role"},
         "h3": {"data-document-role"},
@@ -599,6 +643,17 @@ def _sanitize(root: Tag, *, image_base_url: str, preserve_block_ids: bool) -> No
             for dimension in ("width", "height"):
                 if tag.get(dimension) and not re.fullmatch(r"[1-9]\d{0,4}", tag[dimension]):
                     del tag.attrs[dimension]
+
+        if tag.name == "div":
+            classes = [class_name for class_name in tag.get("class", []) if class_name in DSFR_DIV_CLASSES]
+            if classes:
+                tag["class"] = classes
+            else:
+                tag.attrs.pop("class", None)
+
+    for tag in list(root.find_all("div")):
+        if not tag.get("class"):
+            tag.unwrap()
 
 
 def _sanitize_images(root: Tag, image_base_url: str) -> None:

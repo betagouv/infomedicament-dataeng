@@ -301,6 +301,9 @@ def test_parse_semantic_document_recognizes_list_families_and_nesting():
     <p class="AMMListePuces10"><span style="font-family: Symbol">&#8226; </span>back to root</p>
     <p class="AmmNoticeListePuces"><span style="font-family: Symbol">&#8226; </span>notice bullet</p>
     <p class="MsoListParagraphCxSpLast">Word bullet</p>
+    <p class="MsoListParagraph">o plain o marker</p>
+    <p class="MsoListParagraph"><span>o </span>inline o marker</p>
+    <ul><li>o native o marker</li></ul>
     """
 
     html = BeautifulSoup(parse_semantic_document(source).content_html, "html.parser")
@@ -311,12 +314,37 @@ def test_parse_semantic_document_recognizes_list_families_and_nesting():
         "back to root",
         "notice bullet",
         "Word bullet",
+        "plain o marker",
+        "inline o marker",
     ]
     assert [item.get_text(strip=True) for item in root_list.find("ul").find_all("li", recursive=False)] == [
         "nested",
         "nested variant",
     ]
     assert "•" not in html.get_text()
+    assert html.find("li", string="native o marker") is not None
+
+
+def test_parse_semantic_document_adds_dsfr_table_and_alert_markup():
+    source = """
+    <div style="border:solid windowtext 1.0pt;padding:1.0pt 1.0pt 1.0pt 1.0pt">Important</div>
+    <table><tbody><tr><td>Value</td></tr></tbody></table>
+    <div class="untrusted">Regular content</div>
+    """
+
+    html = BeautifulSoup(parse_semantic_document(source).content_html, "html.parser")
+
+    alert = html.find("div", class_="fr-alert")
+    assert alert.get_text(strip=True) == "Important"
+    table = html.find("table")
+    assert [table.parent["class"], table.parent.parent["class"], table.parent.parent.parent["class"]] == [
+        ["fr-table__content"],
+        ["fr-table__container"],
+        ["fr-table__wrapper"],
+    ]
+    assert table.parent.parent.parent.parent["class"] == ["fr-table"]
+    assert html.find("div", class_="untrusted") is None
+    assert "Regular content" in html.get_text()
 
 
 def test_parse_semantic_document_removes_word_noise_but_keeps_footnote_meaning():
@@ -459,5 +487,11 @@ def test_parse_semantic_document_sanitizes_rich_content_and_is_deterministic():
     assert len(block_ids) == len(set(block_ids))
     assert block_ids == [f"document-b{number:04d}" for number in range(1, len(block_ids) + 1)]
     assert all(not attr.startswith("on") for tag in html.find_all(True) for attr in tag.attrs)
-    assert all("style" not in tag.attrs and "class" not in tag.attrs for tag in html.find_all(True))
+    assert all("style" not in tag.attrs for tag in html.find_all(True))
+    assert {class_name for tag in html.find_all(True) for class_name in tag.get("class", [])} == {
+        "fr-table",
+        "fr-table__wrapper",
+        "fr-table__container",
+        "fr-table__content",
+    }
     assert html.find("p").get("data-document-role") is None
