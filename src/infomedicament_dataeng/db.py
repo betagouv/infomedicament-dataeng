@@ -145,9 +145,7 @@ def get_authorized_cis(config: DatabaseConfig | None = None) -> set[str]:
         return {str(row[0]) for row in result.fetchall()}
 
 
-def get_centralised_specialties(
-    config: PostgresConfig | None = None, cis: str | None = None
-) -> list[dict[str, str]]:
+def get_centralised_specialties(config: PostgresConfig | None = None, cis: str | None = None) -> list[dict[str, str]]:
     """Return centralised specialties and their EMA product number from PostgreSQL."""
     engine = get_postgres_engine(config)
     with engine.connect() as conn:

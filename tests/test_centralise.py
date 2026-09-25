@@ -137,9 +137,7 @@ class TestEmaDocumentReport:
         )
 
         with caplog.at_level(logging.ERROR, logger=cli.__name__):
-            result = cli._get_ema_worklist(
-                [{"cis": "61234567", "denomination": "TEST", "code_ema": "EMEA/H/C/999999"}]
-            )
+            result = cli._get_ema_worklist([{"cis": "61234567", "denomination": "TEST", "code_ema": "EMEA/H/C/999999"}])
 
         assert result == {}
         assert "French EMA product-information translation missing for CIS 61234567" in caplog.text

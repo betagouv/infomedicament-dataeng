@@ -253,8 +253,7 @@ def test_import_semantic_documents_from_db_reads_selected_document_urls(monkeypa
     monkeypatch.setattr(
         cli,
         "_download_document",
-        lambda url: downloads.append(url)
-        or b'<p class="AmmDenomination">TEST</p><p class="AmmCorpsTexte">Body</p>',
+        lambda url: downloads.append(url) or b'<p class="AmmDenomination">TEST</p><p class="AmmCorpsTexte">Body</p>',
     )
     monkeypatch.setattr(
         cli,

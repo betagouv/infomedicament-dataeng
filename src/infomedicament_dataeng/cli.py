@@ -949,18 +949,14 @@ def _ema_document_updated_since(document: dict, cutoff: datetime) -> bool:
     return updated >= cutoff
 
 
-def _get_ema_worklist(
-    specialties: list[dict], document_index: dict[str, dict] | None = None
-) -> dict[str, list[dict]]:
+def _get_ema_worklist(specialties: list[dict], document_index: dict[str, dict] | None = None) -> dict[str, list[dict]]:
     """Resolve centralised specialties to current French EMA PI URLs."""
     from .centralise.acquire import build_product_information_index, fetch_ema_document_report
 
     if not specialties:
         return {}
     index = (
-        document_index
-        if document_index is not None
-        else build_product_information_index(fetch_ema_document_report())
+        document_index if document_index is not None else build_product_information_index(fetch_ema_document_report())
     )
     worklist: dict[str, list[dict]] = {}
     for specialty in specialties:
