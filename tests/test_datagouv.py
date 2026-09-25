@@ -181,6 +181,19 @@ class TestImportDataset:
         assert "col_a, col_b, col_c" in copy_sql
         assert buf.getvalue() == '"val1","val2","val3"\n"val4","val5","val6"\n'
 
+    def test_ignores_surplus_trailing_empty_csv_field(self, sample_dataset: DataGouvDataset):
+        mock_engine_patch, mock_engine, mock_conn = self._mock_engine()
+        with (
+            mock_engine_patch,
+            patch("infomedicament_dataeng.datagouv.importer.fetch_csv", return_value=[["val1", "val2", "val3", ""]]),
+        ):
+            count = import_dataset(sample_dataset)
+
+        cur = mock_conn.connection.dbapi_connection.cursor.return_value.__enter__.return_value
+        _, buf = cur.copy_expert.call_args.args
+        assert count == 1
+        assert buf.getvalue() == '"val1","val2","val3"\n'
+
     def test_serializes_typed_nulls_and_arrays(self, sample_dataset: DataGouvDataset):
         sample_dataset.columns = [
             ColumnDef(name="col_a", type="int"),

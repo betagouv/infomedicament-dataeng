@@ -109,6 +109,7 @@ def import_dataset(dataset: DataGouvDataset, config: PostgresConfig | None = Non
 
     rows = fetch_csv(dataset)
     expected_cols = len(dataset.columns)
+    rows = [row[:-1] if len(row) == expected_cols + 1 and row[-1] == "" else row for row in rows]
     valid_rows = [row for row in rows if len(row) == expected_cols]
     if len(valid_rows) < len(rows):
         logger.warning(
