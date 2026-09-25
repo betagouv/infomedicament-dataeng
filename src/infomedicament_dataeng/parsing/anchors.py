@@ -1,0 +1,43 @@
+"""Canonical section anchors shared by semantic document parsers."""
+
+RCP_NUMBER_TO_ANCHOR: dict[str, str] = {
+    "1": "RcpDenomination",
+    "2": "RcpCompoQualiQuanti",
+    "3": "RcpFormePharm",
+    "4": "RcpDonneesCliniques",
+    "4.1": "RcpIndicTherap",
+    "4.2": "RcpPosoAdmin",
+    "4.3": "RcpContreindications",
+    "4.4": "RcpMisesEnGarde",
+    "4.5": "RcpInteractionsMed",
+    "4.6": "RcpFertGrossAllait",
+    "4.7": "RcpConduite",
+    "4.8": "RcpEffetsIndesirables",
+    "4.9": "RcpSurdosage",
+    "5": "RcpPropPharmacologiques",
+    "5.1": "RcpPropPharmacodynamiques",
+    "5.2": "RcpPropPharmacocinetiques",
+    "5.3": "RcpSecuritePreclinique",
+    "6": "RcpDonneesPharmaceutiques",
+    "6.1": "RcpListeExcipients",
+    "6.2": "RcpIncompatibilites",
+    "6.3": "RcpDureeConservation",
+    "6.4": "RcpPrecConservation",
+    "6.5": "RcpEmballage",
+    "6.6": "RcpPrecEmpl",
+    "7": "RcpTitulaireAmm",
+    "8": "RcpNumAutor",
+    "9": "RcpPremiereAutorisation",
+    "10": "RcpDateRevision",
+    "11": "RcpDosimetrie",
+    "12": "RcpInstPrepRadioph",
+}
+
+NOTICE_NUMBER_TO_ANCHOR: dict[str, str] = {
+    "1": "Ann3bQuestceque",
+    "2": "Ann3bInfoNecessaires",
+    "3": "Ann3bCommentPrendre",
+    "4": "Ann3bEffetsIndesirables",
+    "5": "Ann3bConservation",
+    "6": "Ann3bEmballage",
+}
