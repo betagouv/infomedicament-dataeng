@@ -9,6 +9,7 @@ PostgreSQL `ansm_*` tables are the source of truth for specialties and document 
 - [Semantic Notice/RCP import](#database-driven-semantic-import) — import changed ANSM and EMA documents from the PostgreSQL catalog.
 - [ANSM catalog imports](#ansm-catalog-imports) — load Frictionless datapackages and configured data.gouv.fr datasets into PostgreSQL.
 - [Grist reference data](#grist-reference-data) — synchronize hand-maintained reference tables into PostgreSQL.
+- [Indications](#indications) — derive pathology and clinical-class indications from ANSM and Grist data.
 - [Centralised EMA utilities](#centralised-ema-utilities) — cache, inspect, and selectively reprocess EMA product-information PDFs.
 - [Pediatric classification](#pediatric-classification) — classify medicines from semantic RCP content stored in PostgreSQL.
 - [Local semantic parser](#local-semantic-parser) — inspect semantic parser output without database access.
@@ -115,6 +116,16 @@ uv run infomedicament-dataeng sync-grist
 ```
 
 The command requires `GRIST_DOC_ID` and `GRIST_API_KEY`. It reads from `https://grist.numerique.gouv.fr`, matching the previous application-side synchronization script. Each non-empty Grist table replaces its corresponding PostgreSQL table in a transaction; an unexpectedly empty Grist table leaves the existing PostgreSQL data unchanged.
+
+## Indications
+
+Build the application `indications` table after importing the ANSM catalog and synchronizing Grist:
+
+```bash
+uv run infomedicament-dataeng build-indications
+```
+
+The command combines `ansm_pathologie`, `ansm_classe_clinique`, their specialty relationships, visible specialties, and editorial definitions from `ref_pathologies`. Existing indication IDs are retained according to the previous aggregation rules. The rebuild is atomic and does not use the legacy MySQL database.
 
 ## Centralised EMA utilities
 

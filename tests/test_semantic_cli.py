@@ -316,6 +316,19 @@ def test_main_routes_grist_sync(monkeypatch):
     assert calls == [("doc-id", "api-key", "postgres-config")]
 
 
+def test_main_routes_indications_build(monkeypatch):
+    calls = []
+    config = SimpleNamespace(log_level="INFO", postgres="postgres-config")
+    result = SimpleNamespace(inserted=1, updated=2, deleted=3)
+    monkeypatch.setattr(cli, "get_config", lambda: config)
+    monkeypatch.setattr(cli, "build_indications", lambda postgres: calls.append(postgres) or result)
+    monkeypatch.setattr(sys, "argv", ["infomedicament-dataeng", "build-indications"])
+
+    cli.main()
+
+    assert calls == ["postgres-config"]
+
+
 def test_main_routes_pediatric_classification_from_postgres(monkeypatch, tmp_path):
     output = tmp_path / "predictions.csv"
     records = iter([{"cis": "61234567", "content_html": "<p>RCP</p>", "atc_code": "A01"}])

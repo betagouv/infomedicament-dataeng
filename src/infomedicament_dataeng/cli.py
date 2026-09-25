@@ -26,6 +26,7 @@ from .db import (
     sync_specialites_metadata_from_db,
 )
 from .grist import sync_grist
+from .indications import build_indications
 from .parsing import DEFAULT_IMAGE_BASE_URL, parse_semantic_document
 from .s3 import make_s3_client
 
@@ -821,6 +822,7 @@ Examples:
     )
 
     subparsers.add_parser("sync-grist", help="Synchronize Grist reference data into PostgreSQL")
+    subparsers.add_parser("build-indications", help="Build indications from ANSM and Grist reference data")
 
     pediatric_parser = subparsers.add_parser(
         "classify-pediatric",
@@ -946,6 +948,19 @@ Examples:
     elif args.command == "sync-grist":
         try:
             sync_grist(config.grist.doc_id, config.grist.api_key, config.postgres)
+        except Exception as e:
+            logger.exception(f"Error: {e}")
+            raise SystemExit(1)
+
+    elif args.command == "build-indications":
+        try:
+            result = build_indications(config.postgres)
+            logger.info(
+                "Indications synchronized: %d inserted, %d updated, %d deleted",
+                result.inserted,
+                result.updated,
+                result.deleted,
+            )
         except Exception as e:
             logger.exception(f"Error: {e}")
             raise SystemExit(1)
