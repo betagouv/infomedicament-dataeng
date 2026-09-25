@@ -25,6 +25,7 @@ from .db import (
     iter_pediatric_rcps,
     sync_specialites_metadata_from_db,
 )
+from .grist import sync_grist
 from .parsing import DEFAULT_IMAGE_BASE_URL, parse_semantic_document
 from .s3 import make_s3_client
 
@@ -819,6 +820,8 @@ Examples:
         help="Name of a single resource to load (default: all, in dependency order)",
     )
 
+    subparsers.add_parser("sync-grist", help="Synchronize Grist reference data into PostgreSQL")
+
     pediatric_parser = subparsers.add_parser(
         "classify-pediatric",
         help="Classify semantic RCP content read from PostgreSQL",
@@ -936,6 +939,13 @@ Examples:
     elif args.command == "import-datapackage":
         try:
             import_datapackage(args.package, resource_name=args.resource)
+        except Exception as e:
+            logger.exception(f"Error: {e}")
+            raise SystemExit(1)
+
+    elif args.command == "sync-grist":
+        try:
+            sync_grist(config.grist.doc_id, config.grist.api_key, config.postgres)
         except Exception as e:
             logger.exception(f"Error: {e}")
             raise SystemExit(1)

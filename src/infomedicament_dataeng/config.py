@@ -83,11 +83,27 @@ class PostgresConfig:
 
 
 @dataclass
+class GristConfig:
+    """Credentials for the Info Medicament reference-data document."""
+
+    doc_id: str
+    api_key: str
+
+    @classmethod
+    def from_env(cls) -> "GristConfig":
+        return cls(
+            doc_id=os.environ.get("GRIST_DOC_ID", ""),
+            api_key=os.environ.get("GRIST_API_KEY", ""),
+        )
+
+
+@dataclass
 class AppConfig:
     """Application configuration."""
 
     s3: S3Config
     postgres: PostgresConfig
+    grist: GristConfig
     cdn_base_url: str
     log_level: str
 
@@ -97,6 +113,7 @@ class AppConfig:
         return cls(
             s3=S3Config.from_env(),
             postgres=PostgresConfig.from_env(),
+            grist=GristConfig.from_env(),
             cdn_base_url=os.environ.get(
                 "CDN_BASE_URL", "https://cellar-c2.services.clever-cloud.com/info-medicaments/exports/images"
             ),

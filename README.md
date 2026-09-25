@@ -8,6 +8,7 @@ PostgreSQL `ansm_*` tables are the source of truth for specialties and document 
 
 - [Semantic Notice/RCP import](#database-driven-semantic-import) — import changed ANSM and EMA documents from the PostgreSQL catalog.
 - [ANSM catalog imports](#ansm-catalog-imports) — load Frictionless datapackages and configured data.gouv.fr datasets into PostgreSQL.
+- [Grist reference data](#grist-reference-data) — synchronize hand-maintained reference tables into PostgreSQL.
 - [Centralised EMA utilities](#centralised-ema-utilities) — cache, inspect, and selectively reprocess EMA product-information PDFs.
 - [Pediatric classification](#pediatric-classification) — classify medicines from semantic RCP content stored in PostgreSQL.
 - [Local semantic parser](#local-semantic-parser) — inspect semantic parser output without database access.
@@ -105,6 +106,16 @@ uv run infomedicament-dataeng import-datagouv \
 
 Each selected target table is truncated and fully reloaded. Use `--dataset NAME` to import one dataset from the YAML file.
 
+## Grist reference data
+
+Synchronize the hand-maintained reference tables from the Info Médicament Grist document:
+
+```bash
+uv run infomedicament-dataeng sync-grist
+```
+
+The command requires `GRIST_DOC_ID` and `GRIST_API_KEY`. It reads from `https://grist.numerique.gouv.fr`, matching the previous application-side synchronization script. Each non-empty Grist table replaces its corresponding PostgreSQL table in a transaction; an unexpectedly empty Grist table leaves the existing PostgreSQL data unchanged.
+
 ## Centralised EMA utilities
 
 `semantic-db-import` already processes centralised medicines. These commands remain available for cache warming, targeted recovery, and parser development.
@@ -186,6 +197,8 @@ Use either:
 
 - `CDN_BASE_URL`
 - `LOG_LEVEL`
+- `GRIST_DOC_ID`
+- `GRIST_API_KEY`
 
 ## Scalingo tasks
 

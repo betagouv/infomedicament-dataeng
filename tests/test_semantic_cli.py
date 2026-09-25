@@ -300,6 +300,22 @@ def test_main_rejects_conflicting_semantic_db_source_flags(monkeypatch):
         cli.main()
 
 
+def test_main_routes_grist_sync(monkeypatch):
+    calls = []
+    config = SimpleNamespace(
+        log_level="INFO",
+        postgres="postgres-config",
+        grist=SimpleNamespace(doc_id="doc-id", api_key="api-key"),
+    )
+    monkeypatch.setattr(cli, "get_config", lambda: config)
+    monkeypatch.setattr(cli, "sync_grist", lambda *args: calls.append(args))
+    monkeypatch.setattr(sys, "argv", ["infomedicament-dataeng", "sync-grist"])
+
+    cli.main()
+
+    assert calls == [("doc-id", "api-key", "postgres-config")]
+
+
 def test_main_routes_pediatric_classification_from_postgres(monkeypatch, tmp_path):
     output = tmp_path / "predictions.csv"
     records = iter([{"cis": "61234567", "content_html": "<p>RCP</p>", "atc_code": "A01"}])
