@@ -27,6 +27,7 @@ from .db import (
 )
 from .grist import sync_grist
 from .indications import build_indications
+from .orchestration import PipelineAlreadyRunning, run_daily_sync
 from .parsing import DEFAULT_IMAGE_BASE_URL, parse_semantic_document
 from .resume import RESUME_TARGETS, build_resume
 from .s3 import make_s3_client
@@ -831,6 +832,13 @@ Examples:
         default="all",
         help="Resume table to build (default: all)",
     )
+    daily_sync_parser = subparsers.add_parser("daily-sync", help="Run the complete daily data refresh pipeline")
+    daily_sync_parser.add_argument(
+        "--trigger",
+        choices=("manual", "schedule", "retry"),
+        default="manual",
+        help="How this run was started (default: manual)",
+    )
 
     pediatric_parser = subparsers.add_parser(
         "classify-pediatric",
@@ -977,6 +985,16 @@ Examples:
         try:
             results = build_resume(args.target, config.postgres)
             logger.info("Resume tables built: %s", ", ".join(f"{name}={count}" for name, count in results.items()))
+        except Exception as e:
+            logger.exception(f"Error: {e}")
+            raise SystemExit(1)
+
+    elif args.command == "daily-sync":
+        try:
+            run_daily_sync(config, import_semantic_documents_from_db, trigger=args.trigger)
+        except PipelineAlreadyRunning as e:
+            logger.error("Daily sync not started: %s", e)
+            raise SystemExit(2)
         except Exception as e:
             logger.exception(f"Error: {e}")
             raise SystemExit(1)

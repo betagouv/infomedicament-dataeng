@@ -108,6 +108,38 @@ uv run infomedicament-dataeng import-datagouv \
 
 Each selected target table is truncated and fully reloaded. Use `--dataset NAME` to import one dataset from the YAML file.
 
+## Daily orchestration
+
+Run the complete sequential refresh (ANSM, HAS, Grist, semantic documents, indications, and resume tables):
+
+```bash
+uv run infomedicament-dataeng daily-sync
+```
+
+The dependency-oriented target is shown below. This is not the current execution order: the first implementation runs
+each step sequentially, but the graph makes the safe parallelism explicit.
+
+```text
+[ANSM import] --+
+                +--> [ANSM + Grist ready] --+--> [Semantic import] --------+
+[Grist sync] ---+                            |                              |
+                                             +--> [Build indications]       |
+                                                       |                    |
+                                                       v                    v
+                                                 [Build resume] ------> [Run success]
+                                                                            ^
+[HAS import] ----------------------------------------------------------------+
+```
+
+`ANSM + Grist ready` is a dependency join, not an additional script. Semantic import and indication building can run in
+parallel after that join. Resume building waits for indications; HAS has no downstream dependency in this repository.
+The run succeeds only after the HAS, semantic, and resume branches have all completed.
+
+Scheduled runs should use `daily-sync --trigger schedule`. The command prevents overlap with a PostgreSQL advisory lock,
+stops on the first failed step, and records its name and error on the pipeline run. The latest successful run's start time
+is used as the semantic import cutoff; the first run performs a full semantic import. ANSM and HAS resources are fully
+imported on every run, and Grist, indications, and resume tables are always synchronized or rebuilt.
+
 ## Grist reference data
 
 Synchronize the hand-maintained reference tables from the Info Médicament Grist document:
