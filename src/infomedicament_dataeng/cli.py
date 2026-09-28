@@ -28,6 +28,7 @@ from .db import (
 from .grist import sync_grist
 from .indications import build_indications
 from .parsing import DEFAULT_IMAGE_BASE_URL, parse_semantic_document
+from .resume import RESUME_TARGETS, build_resume
 from .s3 import make_s3_client
 
 logger = logging.getLogger(__name__)
@@ -823,6 +824,13 @@ Examples:
 
     subparsers.add_parser("sync-grist", help="Synchronize Grist reference data into PostgreSQL")
     subparsers.add_parser("build-indications", help="Build indications from ANSM and Grist reference data")
+    resume_parser = subparsers.add_parser("build-resume", help="Build denormalized browse and search tables")
+    resume_parser.add_argument(
+        "--target",
+        choices=("all", *RESUME_TARGETS),
+        default="all",
+        help="Resume table to build (default: all)",
+    )
 
     pediatric_parser = subparsers.add_parser(
         "classify-pediatric",
@@ -961,6 +969,14 @@ Examples:
                 result.updated,
                 result.deleted,
             )
+        except Exception as e:
+            logger.exception(f"Error: {e}")
+            raise SystemExit(1)
+
+    elif args.command == "build-resume":
+        try:
+            results = build_resume(args.target, config.postgres)
+            logger.info("Resume tables built: %s", ", ".join(f"{name}={count}" for name, count in results.items()))
         except Exception as e:
             logger.exception(f"Error: {e}")
             raise SystemExit(1)

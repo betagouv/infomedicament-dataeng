@@ -10,6 +10,7 @@ PostgreSQL `ansm_*` tables are the source of truth for specialties and document 
 - [ANSM catalog imports](#ansm-catalog-imports) — load Frictionless datapackages and configured data.gouv.fr datasets into PostgreSQL.
 - [Grist reference data](#grist-reference-data) — synchronize hand-maintained reference tables into PostgreSQL.
 - [Indications](#indications) — derive pathology and clinical-class indications from ANSM and Grist data.
+- [Resume tables](#resume-tables) — materialize browse and search summaries.
 - [Centralised EMA utilities](#centralised-ema-utilities) — cache, inspect, and selectively reprocess EMA product-information PDFs.
 - [Pediatric classification](#pediatric-classification) — classify medicines from semantic RCP content stored in PostgreSQL.
 - [Local semantic parser](#local-semantic-parser) — inspect semantic parser output without database access.
@@ -126,6 +127,16 @@ uv run infomedicament-dataeng build-indications
 ```
 
 The command combines `ansm_pathologie`, `ansm_classe_clinique`, their specialty relationships, visible specialties, and editorial definitions from `ref_pathologies`. Existing indication IDs are retained according to the previous aggregation rules. The rebuild is atomic and does not use the legacy MySQL database.
+
+## Resume tables
+
+After importing ANSM data, synchronizing Grist, and building indications, rebuild all denormalized application summaries:
+
+```bash
+uv run infomedicament-dataeng build-resume
+```
+
+Individual outputs can be rebuilt with `--target indications`, `substances`, `generiques`, `medicaments`, or `specialites`. Each output table and its associated alphabetic navigation row are replaced in one transaction. The builders use only PostgreSQL `ansm_*`, `ref_*`, and `indications` tables; they do not access the legacy MySQL database.
 
 ## Centralised EMA utilities
 
