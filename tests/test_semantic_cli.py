@@ -135,6 +135,7 @@ def test_import_semantic_documents_from_db_reads_selected_document_urls(monkeypa
     downloads = []
     imports = []
     monkeypatch.setattr(cli, "get_config", lambda: config)
+    monkeypatch.setattr(cli, "get_latest_ansm_document_modification", lambda config: cutoff)
     monkeypatch.setattr(cli, "make_s3_client", lambda: client)
     monkeypatch.setattr(cli, "get_glossary_terms", lambda config: [])
     monkeypatch.setattr(
@@ -157,7 +158,7 @@ def test_import_semantic_documents_from_db_reads_selected_document_urls(monkeypa
         lambda records, table, config: imports.append((table, list(records))) or (len(records), 0),
     )
 
-    cli.import_semantic_documents_from_db(
+    watermark = cli.import_semantic_documents_from_db(
         since=cutoff,
         cis="61234567",
         limite=1,
@@ -172,6 +173,7 @@ def test_import_semantic_documents_from_db_reads_selected_document_urls(monkeypa
     assert [table for table, _ in imports] == ["rcp", "notices"]
     assert imports[0][1][0]["cis"] == "61234567"
     assert imports[1][1][0]["filename"] == "N0000001.htm"
+    assert watermark == cutoff
 
 
 def test_download_document_rejects_non_https_url():
@@ -232,9 +234,10 @@ def test_db_import_selects_centralised_specialty_updated_only_at_ema(monkeypatch
     monkeypatch.setattr(cli, "get_glossary_terms", lambda config: [])
     monkeypatch.setattr(cli, "import_semantic_documents", lambda records, table, config: (0, 0))
 
-    cli.import_semantic_documents_from_db(since=cutoff, centralised_only=True)
+    watermark = cli.import_semantic_documents_from_db(since=cutoff, centralised_only=True)
 
     assert selected == [{**specialty, "procedure": "CENTRALISEE", "documents": {}}]
+    assert watermark == datetime(2026, 9, 24, 8, tzinfo=timezone.utc)
 
 
 def test_main_routes_semantic_db_full_import(monkeypatch):
@@ -275,6 +278,11 @@ def test_full_db_import_reconciles_specialty_metadata(monkeypatch):
     synced = []
     config = SimpleNamespace(postgres="postgres-config")
     monkeypatch.setattr(cli, "get_config", lambda: config)
+    monkeypatch.setattr(
+        cli,
+        "get_latest_ansm_document_modification",
+        lambda config: datetime(2026, 9, 25, tzinfo=timezone.utc),
+    )
     monkeypatch.setattr(cli, "sync_specialites_metadata_from_db", lambda config: synced.append(config))
     monkeypatch.setattr(cli, "get_semantic_import_worklist", lambda *args, **kwargs: [])
     monkeypatch.setattr("infomedicament_dataeng.db.get_centralised_specialties", lambda config, cis=None: [])

@@ -3,7 +3,7 @@
 import logging
 import traceback
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 # Stable PostgreSQL advisory-lock key used to prevent overlapping daily-sync runs.
 ADVISORY_LOCK_ID = 4_806_644_302_025_092_801
 MAX_ERROR_LENGTH = 8_000
+SEMANTIC_WATERMARK_OVERLAP = timedelta(hours=24)
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -34,9 +35,12 @@ class RunLedger:
     def __init__(self, connection):
         self.connection = connection
 
-    def previous_success_started_at(self) -> datetime | None:
+    def previous_semantic_watermark(self) -> datetime | None:
         return self.connection.execute(
-            text("SELECT started_at FROM pipeline_run WHERE status = 'success' ORDER BY started_at DESC LIMIT 1")
+            text(
+                "SELECT semantic_watermark FROM pipeline_run "
+                "WHERE semantic_watermark IS NOT NULL ORDER BY started_at DESC LIMIT 1"
+            )
         ).scalar_one_or_none()
 
     def start_run(self, trigger: str, started_at: datetime) -> UUID:
@@ -50,6 +54,13 @@ class RunLedger:
         )
         self.connection.commit()
         return run_id
+
+    def record_semantic_watermark(self, run_id: UUID, watermark: datetime) -> None:
+        self.connection.execute(
+            text("UPDATE pipeline_run SET semantic_watermark = :watermark WHERE id = :id"),
+            {"id": run_id, "watermark": watermark},
+        )
+        self.connection.commit()
 
     def finish_run(
         self,
@@ -89,7 +100,7 @@ def _error_details(error: BaseException) -> str:
 
 def run_daily_sync(
     config: AppConfig,
-    semantic_importer: Callable[..., None],
+    semantic_importer: Callable[..., datetime | None],
     *,
     trigger: str = "manual",
     ansm_config: Path = PROJECT_ROOT / "data_sources" / "ansm.yml",
@@ -107,8 +118,17 @@ def run_daily_sync(
         try:
             ledger = RunLedger(connection)
             started_at = datetime.now(timezone.utc)
-            previous_success = ledger.previous_success_started_at()
+            previous_watermark = ledger.previous_semantic_watermark()
+            semantic_cutoff = (
+                previous_watermark - SEMANTIC_WATERMARK_OVERLAP if previous_watermark is not None else None
+            )
             run_id = ledger.start_run(trigger, started_at)
+
+            def import_semantic() -> None:
+                watermark = semantic_importer(since=semantic_cutoff, full=previous_watermark is None)
+                if watermark is not None:
+                    ledger.record_semantic_watermark(run_id, watermark)
+
             steps = [
                 ("import-ansm", lambda: sync_datagouv_config(ansm_config)),
                 ("import-has", lambda: sync_datagouv_config(has_config)),
@@ -118,7 +138,7 @@ def run_daily_sync(
                 ),
                 (
                     "semantic-db-import",
-                    lambda: semantic_importer(since=previous_success, full=previous_success is None),
+                    import_semantic,
                 ),
                 ("build-indications", lambda: build_indications(config.postgres)),
                 ("build-resume", lambda: build_resume("all", config.postgres)),

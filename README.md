@@ -136,9 +136,11 @@ parallel after that join. Resume building waits for indications; HAS has no down
 The run succeeds only after the HAS, semantic, and resume branches have all completed.
 
 Scheduled runs should use `daily-sync --trigger schedule`. The command prevents overlap with a PostgreSQL advisory lock,
-stops on the first failed step, and records its name and error on the pipeline run. The latest successful run's start time
-is used as the semantic import cutoff; the first run performs a full semantic import. ANSM and HAS resources are fully
-imported on every run, and Grist, indications, and resume tables are always synchronized or rebuilt.
+stops on the first failed step, and records its name and error on the pipeline run. After a successful semantic import,
+the latest analyzed ANSM or EMA source modification date is persisted as its semantic watermark. The next run subtracts
+24 hours from that watermark and reprocesses documents from the resulting cutoff; the first run performs a full semantic
+import. ANSM and HAS resources are fully imported on every run, and Grist, indications, and resume tables are always
+synchronized or rebuilt.
 
 ## Grist reference data
 

@@ -20,6 +20,7 @@ from .datagouv import import_dataset, load_datasets
 from .datapackage_importer import import_datapackage
 from .db import (
     get_glossary_terms,
+    get_latest_ansm_document_modification,
     get_semantic_import_worklist,
     import_semantic_documents,
     iter_pediatric_rcps,
@@ -140,7 +141,7 @@ def import_semantic_documents_from_db(
     batch_size: int = 500,
     centralised_only: bool = False,
     non_centralised_only: bool = False,
-) -> None:
+) -> datetime | None:
     """Import Notice/RCP content for specialties selected from PostgreSQL."""
     from .centralise.acquire import get_ema_pdf, pdf_cache_key
     from .centralise.match import match_presentation
@@ -152,6 +153,13 @@ def import_semantic_documents_from_db(
         raise ValueError("--centralised-only and --non-centralised-only are mutually exclusive")
     cutoff = None if full else since or datetime.now(timezone.utc) - timedelta(hours=24)
     config = get_config()
+    source_watermarks = []
+    if not centralised_only:
+        ansm_watermark = get_latest_ansm_document_modification(config.postgres)
+        if ansm_watermark is not None:
+            if ansm_watermark.tzinfo is None:
+                ansm_watermark = ansm_watermark.replace(tzinfo=timezone.utc)
+            source_watermarks.append(ansm_watermark)
     if full:
         sync_specialites_metadata_from_db(config.postgres)
     worklist = get_semantic_import_worklist(cutoff, config.postgres, cis=cis, limit=None)
@@ -166,6 +174,11 @@ def import_semantic_documents_from_db(
 
     all_centralised = [] if non_centralised_only else get_centralised_specialties(config.postgres, cis=cis)
     ema_index = build_product_information_index(fetch_ema_document_report()) if all_centralised else {}
+    for specialty in all_centralised:
+        document = ema_index.get(specialty["code_ema"].strip())
+        updated_at = _ema_document_updated_at(document) if document else None
+        if updated_at is not None:
+            source_watermarks.append(updated_at)
     selected_by_cis = {item["cis"]: item for item in worklist}
     for specialty in all_centralised:
         document = ema_index.get(specialty["code_ema"].strip())
@@ -183,7 +196,7 @@ def import_semantic_documents_from_db(
         " for a full import" if cutoff is None else f" since {cutoff.isoformat()}",
     )
     if not worklist:
-        return
+        return max(source_watermarks, default=None)
 
     s3_client = make_s3_client()
     glossary_terms = get_glossary_terms(config.postgres)
@@ -267,6 +280,7 @@ def import_semantic_documents_from_db(
     )
     if total_db_errors:
         raise RuntimeError(f"Database import failed for {total_db_errors} document(s)")
+    return max(source_watermarks, default=None)
 
 
 def telecharger_html_depuis_s3(
@@ -444,20 +458,26 @@ def run_import_datagouv(config_path: Path, dataset_name: str | None = None) -> N
         logger.info(f"Done: {count} rows imported into '{dataset.postgresql_table}'")
 
 
-def _ema_document_updated_since(document: dict, cutoff: datetime) -> bool:
-    """Return whether EMA's product-information timestamp reaches the cutoff."""
+def _ema_document_updated_at(document: dict) -> datetime | None:
+    """Parse EMA's product-information update timestamp."""
     value = document.get("last_updated_date")
     if not value:
-        return False
+        return None
     try:
         updated = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
     except ValueError:
         logger.error("Invalid EMA product-information last_updated_date: %r", value)
+        return None
+    return updated.replace(tzinfo=timezone.utc) if updated.tzinfo is None else updated
+
+
+def _ema_document_updated_since(document: dict, cutoff: datetime) -> bool:
+    """Return whether EMA's product-information timestamp reaches the cutoff."""
+    updated = _ema_document_updated_at(document)
+    if updated is None:
         return False
     if cutoff.tzinfo is None:
         cutoff = cutoff.replace(tzinfo=timezone.utc)
-    if updated.tzinfo is None:
-        updated = updated.replace(tzinfo=timezone.utc)
     return updated >= cutoff
 
 

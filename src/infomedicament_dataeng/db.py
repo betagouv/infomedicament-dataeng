@@ -44,6 +44,13 @@ def get_glossary_terms(config: PostgresConfig | None = None) -> list[str]:
         return list(result.scalars())
 
 
+def get_latest_ansm_document_modification(config: PostgresConfig | None = None) -> datetime | None:
+    """Return the latest source modification timestamp in the current ANSM catalog."""
+    engine = get_postgres_engine(config)
+    with engine.connect() as conn:
+        return conn.execute(text("SELECT MAX(date_modification) FROM ansm_document")).scalar_one_or_none()
+
+
 def iter_pediatric_rcps(
     config: PostgresConfig | None = None,
     cis: str | None = None,
