@@ -36,21 +36,27 @@ def build(conn) -> int:
         indication_values = indications_for_cis(indications, cis_values)
         atc = atc_by_cis.get(representative.cis)
         letters.add(normalize_letter(name[:1]))
+        specialty_entries = []
+        for specialty in group_specialties:
+            selected = simple_composants(composants_by_cis.get(specialty.cis, []))
+            specialty_entries.append(
+                [
+                    specialty.cis.strip(),
+                    specialty.denomination,
+                    str(specialty.status),
+                    specialty.procedure,
+                    "true" if specialty.cis in surveillance_cis else "false",
+                    display_composants(selected),
+                    ",".join(composant.substance_id.strip() for composant in selected),
+                    ",".join(composant.name_id.strip() for composant in selected),
+                ]
+            )
         rows.append(
             {
                 "groupName": name,
                 "composants": display_composants(composants),
                 "indicationsIds": [value[0] for value in indication_values],
-                "specialites": [
-                    [
-                        specialty.cis,
-                        specialty.denomination,
-                        str(specialty.status),
-                        specialty.procedure,
-                        "true" if specialty.cis in surveillance_cis else "false",
-                    ]
-                    for specialty in group_specialties
-                ],
+                "specialites": specialty_entries,
                 "atc1Code": atc[:1] if atc else None,
                 "atc2Code": atc[:3] if atc else None,
                 "atc5Code": atc,

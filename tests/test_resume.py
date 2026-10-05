@@ -1,12 +1,11 @@
 """Tests for modular resume-table builders."""
 
 from contextlib import nullcontext
-from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 
-from infomedicament_dataeng.resume import builder, medicines, specialties, substances
+from infomedicament_dataeng.resume import builder, composants, medicines, specialties, substances
 from infomedicament_dataeng.resume.common import (
     Composant,
     Specialty,
@@ -28,11 +27,12 @@ def make_composant(
     name="acétylsalicylique (acide)",
     nature="substance",
     number=1,
+    element=1,
 ):
     return Composant(
         cis="1",
-        element_number=1,
-        element_order=1,
+        element_number=element,
+        element_order=element,
         nature=nature,
         composant_number=number,
         composant_order=number,
@@ -79,9 +79,9 @@ def test_numeric_alert_id_normalization():
 
 
 def test_simple_composants_prefers_fractions_per_composant_number():
-    substance = SimpleNamespace(composant_number=1, nature="substance")
-    fraction = SimpleNamespace(composant_number=1, nature="fraction")
-    other = SimpleNamespace(composant_number=2, nature="substance")
+    substance = make_composant(number=1, nature="substance")
+    fraction = make_composant(number=1, nature="fraction")
+    other = make_composant(number=2, nature="substance")
 
     assert simple_composants([substance, fraction, other]) == [fraction, other]
 
@@ -129,12 +129,13 @@ def test_specialties_writes_all_main_names_when_one_name_is_secondary(monkeypatc
     assert rows[0]["subsMainNames"] == "acétylsalicylique (acide), caféine"
 
 
-def test_specialties_omits_main_names_when_all_names_are_canonical(monkeypatch):
+@pytest.mark.parametrize("main_names", [{"00005": "acétylsalicylique (acide)"}, {}])
+def test_specialties_omits_main_names_when_names_match_or_canonical_is_missing(monkeypatch, main_names):
     composant = make_composant()
     rows = []
     monkeypatch.setattr(specialties, "load_specialties", lambda conn: [Specialty("1", "TEST 1 mg", "N", "DISPONIBLE")])
     monkeypatch.setattr(specialties, "load_composants_by_cis", lambda conn: {"1": [composant]})
-    monkeypatch.setattr(specialties, "load_main_names_by_subs_id", lambda conn: {"00005": "acétylsalicylique (acide)"})
+    monkeypatch.setattr(specialties, "load_main_names_by_subs_id", lambda conn: main_names)
     monkeypatch.setattr(specialties, "load_indications", lambda conn: [])
     monkeypatch.setattr(specialties, "load_atc_by_cis", lambda conn: {})
     monkeypatch.setattr(specialties, "load_surveillance_cis", lambda conn: set())
@@ -159,15 +160,150 @@ def test_substances_aggregates_speciality_counts_by_substance_id(monkeypatch):
         ],
     )
     monkeypatch.setattr(substances, "load_composants_by_cis", lambda conn: {"1": [canonical], "2": [secondary]})
+    monkeypatch.setattr(
+        substances, "load_name_types_by_nom_id", lambda conn: {"00005": "CANONIQUE", "34911": "SYNONYME"}
+    )
     monkeypatch.setattr(substances, "replace_rows", lambda conn, table, values: rows.extend(values))
     monkeypatch.setattr(substances, "replace_letters", lambda *args: None)
 
     substances.build(None)
 
     assert rows == [
-        {"SubsId": "00005", "NomId": "00005", "NomLib": "acétylsalicylique (acide)", "specialites": 2},
-        {"SubsId": "00005", "NomId": "34911", "NomLib": "acide acétylsalicylique", "specialites": 2},
+        {
+            "SubsId": "00005",
+            "NomId": "00005",
+            "NomLib": "acétylsalicylique (acide)",
+            "type": "CANONIQUE",
+            "specialites": 2,
+        },
+        {
+            "SubsId": "00005",
+            "NomId": "34911",
+            "NomLib": "acide acétylsalicylique",
+            "type": "SYNONYME",
+            "specialites": 2,
+        },
     ]
+
+
+def test_canonical_lookup_uses_source_type_and_trims_ids():
+    conn = MagicMock()
+    conn.execute.return_value.mappings.return_value = [
+        {"code_substance": " 00123 ", "code_nom": " 98765 ", "nom": " canonical label ", "type": "CANONIQUE"},
+        {"code_substance": "00123", "code_nom": "00123", "nom": "alias", "type": "SYNONYME"},
+        {"code_substance": "00124", "code_nom": "00124", "nom": "untyped", "type": None},
+    ]
+
+    assert composants.load_main_names_by_subs_id(conn) == {"00123": "canonical label"}
+    assert composants.load_name_types_by_nom_id(conn) == {"98765": "CANONIQUE", "00123": "SYNONYME", "00124": None}
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("  alpha&nbsp;&Delta;   substance  ", "alpha Δ substance"),
+        ("&#xE9;&#233;\t&#32;test", "éé test"),
+        ("&amp;&apos;&quot;&lt;&gt;&lsquo;&rsquo;", "&'\"<>‘’"),
+        ("&unknown; &delta; &AMP;", "&unknown; &delta; &AMP;"),
+        ("&#x26;nbsp;\n&#38;Delta;", "Δ"),
+    ],
+)
+def test_clean_substance_name(raw, expected):
+    assert substances.clean_substance_name(raw) == expected
+
+
+def test_substance_rows_use_cleaned_names_for_letters_and_nullable_type(monkeypatch):
+    rows = []
+    letters = []
+    monkeypatch.setattr(substances, "load_specialties", lambda conn: [Specialty("1", "TEST 1 mg", "N", "DISPONIBLE")])
+    monkeypatch.setattr(
+        substances, "load_composants_by_cis", lambda conn: {"1": [make_composant(name="  &#xE9;ther&nbsp;  Δ  ")]}
+    )
+    monkeypatch.setattr(substances, "load_name_types_by_nom_id", lambda conn: {})
+    monkeypatch.setattr(substances, "replace_rows", lambda conn, table, values: rows.extend(values))
+    monkeypatch.setattr(substances, "replace_letters", lambda conn, target, values: letters.append(values))
+
+    substances.build(None)
+
+    assert rows[0]["NomLib"] == "éther Δ"
+    assert rows[0]["type"] is None
+    assert letters == [{"E"}]
+
+
+def test_medicine_specialty_entries_have_independent_ordered_compositions(monkeypatch):
+    first = make_composant(substance_id=" X ", name_id=" X_NAME ", name="substance X")
+    hidden = make_composant(substance_id="Y", name_id="BASE", name="hidden base", number=2)
+    fraction = make_composant(substance_id="Y", name_id="Y_NAME", name="substance Y", number=2, nature="fraction")
+    repeated = make_composant(substance_id="X", name_id="X_OTHER", name="other X", element=2)
+    rows = []
+    monkeypatch.setattr(
+        medicines,
+        "load_specialties",
+        lambda conn: [
+            Specialty("1", "TEST 1 mg", "N", "DISPONIBLE"),
+            Specialty("2", "TEST 2 mg", "C", "ALERTE"),
+            Specialty("3", "TEST 3 mg", "N", "PARTIELLE"),
+        ],
+    )
+    monkeypatch.setattr(
+        medicines, "load_composants_by_cis", lambda conn: {"1": [first], "2": [first, hidden, fraction, repeated]}
+    )
+    monkeypatch.setattr(medicines, "load_indications", lambda conn: [])
+    monkeypatch.setattr(medicines, "load_atc_by_cis", lambda conn: {})
+    monkeypatch.setattr(medicines, "load_surveillance_cis", lambda conn: {"2"})
+    monkeypatch.setattr(medicines, "replace_rows", lambda conn, table, values: rows.extend(values))
+    monkeypatch.setattr(medicines, "replace_letters", lambda *args: None)
+
+    medicines.build(None)
+
+    assert len(rows) == 1
+    assert rows[0]["specialites"] == [
+        ["1", "TEST 1 mg", "1", "N", "false", "substance X", "X", "X_NAME"],
+        ["2", "TEST 2 mg", "3", "C", "true", "substance X, substance Y, other X", "X,Y,X", "X_NAME,Y_NAME,X_OTHER"],
+        ["3", "TEST 3 mg", "2", "N", "false", "", "", ""],
+    ]
+    assert rows[0]["composants"] == "substance X"
+    assert rows[0]["subsIds"] == ["X"]
+    assert rows[0]["subsNamesIds"] == ["X_NAME"]
+
+
+def test_component_selection_keeps_other_kit_elements_and_source_order():
+    base = make_composant()
+    other_element = make_composant(element=2)
+    fraction = make_composant(nature="fraction")
+    repeated = make_composant(element=2, number=2)
+
+    assert composants.simple_composants([base, other_element, fraction, repeated]) == [
+        other_element,
+        fraction,
+        repeated,
+    ]
+
+
+def test_component_mapping_cleans_display_without_changing_source():
+    conn = MagicMock()
+    raw = {
+        "cis": "1",
+        "numero_element": 1,
+        "numero_composant": 1,
+        "code_substance": " 00123 ",
+        "substance": " substance name ((cell source)) ",
+        "nature": "Substance active",
+        "ordre": 1,
+    }
+    conn.execute.return_value.mappings.side_effect = [
+        [raw],
+        [{"code_substance": " 00123 ", "code_nom": " 98765 ", "nom": "canonical", "type": "CANONIQUE"}],
+        [{"cis": "1", "numero_element": 1, "ordre": 1}],
+    ]
+
+    mapped = composants.load_composants_by_cis(conn)["1"][0]
+
+    assert mapped.name == "substance name"
+    assert mapped.name_id == "98765"
+    assert raw["substance"] == " substance name ((cell source)) "
+    assert composants.clean_component_display_name(" name (salt) ") == "name (salt)"
+    assert composants.clean_component_display_name(" name ((nested (source))) ") == "name ((nested (source)))"
 
 
 def test_replace_rows_quotes_application_column_names():

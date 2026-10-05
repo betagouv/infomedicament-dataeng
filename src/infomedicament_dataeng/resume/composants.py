@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import unicodedata
 from collections import defaultdict
 
@@ -33,7 +34,7 @@ def load_composants_by_cis(conn) -> dict[str, list[Composant]]:
 
     names_by_code: dict[str, list[dict]] = defaultdict(list)
     for name in names:
-        names_by_code[str(name["code_substance"])].append(name)
+        names_by_code[(name["code_substance"] or "").strip()].append(name)
     element_orders = {
         (str(element["cis"]), element["numero_element"]): (
             element["ordre"] if element["ordre"] is not None else element["numero_element"]
@@ -70,7 +71,9 @@ def load_composants_by_cis(conn) -> dict[str, list[Composant]]:
                 composant_order=composant_number,
                 substance_id=substance_id,
                 name_id=(preferred["code_nom"].strip() if preferred else substance_id),
-                name=(row["substance"] or "").strip() or ((preferred["nom"] or "").strip() if preferred else ""),
+                name=clean_component_display_name(
+                    (row["substance"] or "").strip() or ((preferred["nom"] or "").strip() if preferred else "")
+                ),
             )
         )
 
@@ -88,22 +91,31 @@ def load_composants_by_cis(conn) -> dict[str, list[Composant]]:
 
 
 def load_main_names_by_subs_id(conn) -> dict[str, str]:
-    rows = conn.execute(text("SELECT code_substance, code_nom, nom FROM ansm_substance_nom")).mappings()
+    rows = conn.execute(text("SELECT code_substance, nom, type FROM ansm_substance_nom")).mappings()
     return {
-        subs_id: (row["nom"] or "").strip()
-        for row in rows
-        if (subs_id := (row["code_substance"] or "").strip()) == (row["code_nom"] or "").strip()
+        (row["code_substance"] or "").strip(): (row["nom"] or "").strip() for row in rows if row["type"] == "CANONIQUE"
     }
 
 
+def load_name_types_by_nom_id(conn) -> dict[str, str | None]:
+    rows = conn.execute(text("SELECT code_nom, type FROM ansm_substance_nom")).mappings()
+    return {(row["code_nom"] or "").strip(): row["type"] for row in rows}
+
+
+def clean_component_display_name(value: str) -> str:
+    return re.sub(r"\s+\(\([^()]+\)\)$", "", value.strip())
+
+
 def simple_composants(composants: list[Composant]) -> list[Composant]:
-    groups: dict[int, list[Composant]] = {}
-    for composant in composants:
-        groups.setdefault(composant.composant_number, []).append(composant)
+    fraction_keys = {
+        (composant.element_number, composant.composant_number)
+        for composant in composants
+        if composant.nature == "fraction"
+    }
     return [
         composant
-        for group in groups.values()
-        for composant in ([item for item in group if item.nature == "fraction"] or group)
+        for composant in composants
+        if composant.nature == "fraction" or (composant.element_number, composant.composant_number) not in fraction_keys
     ]
 
 
