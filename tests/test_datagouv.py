@@ -221,3 +221,15 @@ class TestImportDataset:
         with mock_engine_patch, patch("infomedicament_dataeng.datagouv.importer.fetch_csv", return_value=[]):
             import_dataset(sample_dataset)
         mock_engine.begin.assert_called_once()
+
+    def test_specialty_import_synchronizes_metadata(self, sample_dataset: DataGouvDataset):
+        sample_dataset.postgresql_table = "ansm_specialite"
+        mock_engine_patch, _, mock_conn = self._mock_engine()
+        with (
+            mock_engine_patch,
+            patch("infomedicament_dataeng.datagouv.importer.fetch_csv", return_value=[]),
+            patch("infomedicament_dataeng.datagouv.importer.sync_specialites_metadata") as sync_metadata,
+        ):
+            import_dataset(sample_dataset)
+
+        sync_metadata.assert_called_once_with(mock_conn)

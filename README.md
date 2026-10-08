@@ -8,6 +8,9 @@ PostgreSQL `ansm_*` tables are the source of truth for specialties and document 
 
 - [Semantic Notice/RCP import](#database-driven-semantic-import) — import changed ANSM and EMA documents from the PostgreSQL catalog.
 - [ANSM catalog imports](#ansm-catalog-imports) — load Frictionless datapackages and configured data.gouv.fr datasets into PostgreSQL.
+- [Grist reference data](#grist-reference-data) — synchronize hand-maintained reference tables into PostgreSQL.
+- [Indications](#indications) — derive pathology and clinical-class indications from ANSM and Grist data.
+- [Resume tables](#resume-tables) — materialize browse and search summaries.
 - [Centralised EMA utilities](#centralised-ema-utilities) — cache, inspect, and selectively reprocess EMA product-information PDFs.
 - [Pediatric classification](#pediatric-classification) — classify medicines from semantic RCP content stored in PostgreSQL.
 - [Local semantic parser](#local-semantic-parser) — inspect semantic parser output without database access.
@@ -62,7 +65,7 @@ Options:
 
 `--centralised-only` and `--non-centralised-only` are mutually exclusive. Either flag can be combined with `--full`, `--since`, `--cis`, `--limit`, and `--batch-size`.
 
-The importer writes semantic HTML to `notices.content_html` and `rcp.content_html`. Notice indications also update `specialites_metadata.description`. Glossary terms marked with `ref_glossaire.a_souligner` are annotated in the generated HTML.
+The importer writes semantic HTML to `notices.content_html` and `rcp.content_html`. Notice imports upsert `specialites_metadata.description`, while full semantic imports and ANSM specialty catalog imports reconcile metadata `CIS` and `title` values. Glossary terms marked with `ref_glossaire.a_souligner` are annotated in the generated HTML.
 
 ### Local semantic parser
 
@@ -104,6 +107,70 @@ uv run infomedicament-dataeng import-datagouv \
 ```
 
 Each selected target table is truncated and fully reloaded. Use `--dataset NAME` to import one dataset from the YAML file.
+
+## Daily orchestration
+
+Run the complete sequential refresh (ANSM, HAS, Grist, semantic documents, indications, and resume tables):
+
+```bash
+uv run infomedicament-dataeng daily-sync
+```
+
+The dependency-oriented target is shown below. This is not the current execution order: the first implementation runs
+each step sequentially, but the graph makes the safe parallelism explicit.
+
+```text
+[ANSM import] --+
+                +--> [ANSM + Grist ready] --+--> [Semantic import] --------+
+[Grist sync] ---+                            |                              |
+                                             +--> [Build indications]       |
+                                                       |                    |
+                                                       v                    v
+                                                 [Build resume] ------> [Run success]
+                                                                            ^
+[HAS import] ----------------------------------------------------------------+
+```
+
+`ANSM + Grist ready` is a dependency join, not an additional script. Semantic import and indication building can run in
+parallel after that join. Resume building waits for indications; HAS has no downstream dependency in this repository.
+The run succeeds only after the HAS, semantic, and resume branches have all completed.
+
+Scheduled runs should use `daily-sync --trigger schedule`. The command prevents overlap with a PostgreSQL advisory lock,
+stops on the first failed step, and records its name and error on the pipeline run. After a successful semantic import,
+the latest analyzed ANSM or EMA source modification date is persisted as its semantic watermark. The next run subtracts
+24 hours from that watermark and reprocesses documents from the resulting cutoff; the first run performs a full semantic
+import. ANSM and HAS resources are fully imported on every run, and Grist, indications, and resume tables are always
+synchronized or rebuilt.
+
+## Grist reference data
+
+Synchronize the hand-maintained reference tables from the Info Médicament Grist document:
+
+```bash
+uv run infomedicament-dataeng sync-grist
+```
+
+The command requires `GRIST_DOC_ID` and `GRIST_API_KEY`. It reads from `https://grist.numerique.gouv.fr`, matching the previous application-side synchronization script. Each non-empty Grist table replaces its corresponding PostgreSQL table in a transaction; an unexpectedly empty Grist table leaves the existing PostgreSQL data unchanged.
+
+## Indications
+
+Build the application `indications` table after importing the ANSM catalog and synchronizing Grist:
+
+```bash
+uv run infomedicament-dataeng build-indications
+```
+
+The command combines `ansm_pathologie`, `ansm_classe_clinique`, their specialty relationships, visible specialties, and editorial definitions from `ref_pathologies`. Existing indication IDs are retained according to the previous aggregation rules. The rebuild is atomic and does not use the legacy MySQL database.
+
+## Resume tables
+
+After importing ANSM data, synchronizing Grist, and building indications, rebuild all denormalized application summaries:
+
+```bash
+uv run infomedicament-dataeng build-resume
+```
+
+Individual outputs can be rebuilt with `--target indications`, `substances`, `generiques`, `medicaments`, or `specialites`. Each output table and its associated alphabetic navigation row are replaced in one transaction. The builders use only PostgreSQL `ansm_*`, `ref_*`, and `indications` tables; they do not access the legacy MySQL database.
 
 ## Centralised EMA utilities
 
@@ -186,6 +253,8 @@ Use either:
 
 - `CDN_BASE_URL`
 - `LOG_LEVEL`
+- `GRIST_DOC_ID`
+- `GRIST_API_KEY`
 
 ## Scalingo tasks
 

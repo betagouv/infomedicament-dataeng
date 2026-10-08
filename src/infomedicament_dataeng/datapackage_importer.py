@@ -11,7 +11,7 @@ from frictionless import Package
 from sqlalchemy import text
 
 from .config import PostgresConfig, get_config
-from .db import get_postgres_engine
+from .db import get_postgres_engine, sync_specialites_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -173,6 +173,8 @@ def _load_resource(package: Package, resource_name: str, table_name: str, engine
         logger.warning(f"[{resource_name}] No rows to insert — truncating '{table_name}' and leaving it empty")
         with engine.begin() as conn:
             conn.execute(text(f"TRUNCATE TABLE {table_name}"))
+            if table_name == "ansm_specialite":
+                sync_specialites_metadata(conn)
         return 0
 
     field_names = list(rows[0].keys())
@@ -193,6 +195,8 @@ def _load_resource(package: Package, resource_name: str, table_name: str, engine
                 f"COPY {table_name} ({col_names}) FROM STDIN WITH (FORMAT csv)",
                 buf,
             )
+        if table_name == "ansm_specialite":
+            sync_specialites_metadata(conn)
 
     logger.info(f"[{resource_name}] ✓ {len(rows):,} rows inserted into '{table_name}'")
     return len(rows)

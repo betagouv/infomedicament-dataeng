@@ -12,7 +12,7 @@ import yaml
 from sqlalchemy import text
 
 from ..config import PostgresConfig, get_config
-from ..db import get_postgres_engine
+from ..db import get_postgres_engine, sync_specialites_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -139,5 +139,7 @@ def import_dataset(dataset: DataGouvDataset, config: PostgresConfig | None = Non
                     f"COPY {dataset.postgresql_table} ({col_names}) FROM STDIN WITH (FORMAT csv)",
                     buf,
                 )
+        if dataset.postgresql_table == "ansm_specialite":
+            sync_specialites_metadata(conn)
     logger.info(f"Imported {len(rows)} rows into '{dataset.postgresql_table}'")
     return len(rows)
