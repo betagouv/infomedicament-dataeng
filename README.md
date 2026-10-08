@@ -67,6 +67,16 @@ Options:
 
 The importer writes semantic HTML to `notices.content_html` and `rcp.content_html`. Notice imports upsert `specialites_metadata.description`, while full semantic imports and ANSM specialty catalog imports reconcile metadata `CIS` and `title` values. Glossary terms marked with `ref_glossaire.a_souligner` are annotated in the generated HTML.
 
+Some ANSM UTF-8 exports contain C1 controls inherited from an earlier Latin-1
+conversion of Windows-1252 text (`U+0092` for `’`, `U+009C` for `œ`). The parser
+repairs these defined Windows-1252 characters while preserving correct Unicode.
+Use `semantic-db-import --full` to regenerate already imported documents with
+the corrected parser.
+
+HAS SMR/ASMR labels normalize `££` paragraph separators to blank lines during
+import. Consumers should preserve blank lines when rendering
+these plain-text labels (for example, split them into escaped paragraphs).
+
 ### Local semantic parser
 
 Use `semantic-local` to inspect parser output without accessing a database:

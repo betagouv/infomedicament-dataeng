@@ -26,6 +26,7 @@ datasets:
         type: str
       - name: libelle_asmr
         type: str
+        paragraph_separator: "££"
 
   smr:
     datagouv_dataset_id: "4da2d811-1c29-4f73-9805-83ae710be6d7"
@@ -54,6 +55,7 @@ datasets:
         type: str
       - name: libelle_smr
         type: str
+        paragraph_separator: "££"
 
   url_has:
     datagouv_dataset_id: "f67407e1-2dae-4edf-9d0f-b280d41b731a"

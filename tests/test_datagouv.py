@@ -181,6 +181,22 @@ class TestImportDataset:
         assert "col_a, col_b, col_c" in copy_sql
         assert buf.getvalue() == '"val1","val2","val3"\n"val4","val5","val6"\n'
 
+    @pytest.mark.parametrize("name", ["smr", "asmr"])
+    def test_has_paragraph_markers_become_newlines_in_copy(self, name):
+        dataset = load_datasets(Path("data_sources/has.yml"))[name]
+        row = ["value"] * len(dataset.columns)
+        row[-1] = "l’enfant : cœur££Deuxième paragraphe£ prix"
+        mock_engine_patch, _, mock_conn = self._mock_engine()
+        with mock_engine_patch, patch("infomedicament_dataeng.datagouv.importer.fetch_csv", return_value=[row]):
+            import_dataset(dataset)
+        cur = mock_conn.connection.dbapi_connection.cursor.return_value.__enter__.return_value
+        _, buf = cur.copy_expert.call_args.args
+        import csv
+        import io
+
+        copied = list(csv.reader(io.StringIO(buf.getvalue())))
+        assert copied[0][-1] == "l’enfant : cœur\n\nDeuxième paragraphe£ prix"
+
     def test_ignores_surplus_trailing_empty_csv_field(self, sample_dataset: DataGouvDataset):
         mock_engine_patch, mock_engine, mock_conn = self._mock_engine()
         with (

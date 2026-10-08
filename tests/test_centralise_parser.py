@@ -401,3 +401,28 @@ class TestImages:
             assert image.parent.name == "figure"
             sha = image["src"].split("/centralise/")[1].rsplit(".", 1)[0]
             assert any(sha in k for k in keys), "image URL must point at an uploaded blob"
+
+
+def test_notice_builder_marks_bullets_only_inside_indication_section():
+    from infomedicament_dataeng.parsing.semantic_parser import finalize_semantic_html
+
+    builder = _SemanticHtmlBuilder("notice", "https://example.com/images", "images/", {})
+    for index, (text, bold) in enumerate(
+        [
+            ("1. Indications", True),
+            ("Ce médicament est indiqué pour :", False),
+            ("• Une indication", False),
+            ("• Une autre indication", False),
+            ("2. Précautions", True),
+            ("• Une précaution", False),
+        ]
+    ):
+        builder.add(TextLine(text, 11, bold, 0, index * 20, index * 20 + 12))
+    document = finalize_semantic_html(builder.finish())
+    html = BeautifulSoup(document.content_html, "html.parser")
+    lists = html.find_all("ul")
+    assert lists[0]["data-document-role"] == "indication"
+    assert lists[1].get("data-document-role") is None
+    assert "Une indication" in document.indication
+    assert "Une autre indication" in document.indication
+    assert "Une précaution" not in document.indication
