@@ -136,7 +136,8 @@ class _SemanticHtmlBuilder:
     def _flush_bullets(self) -> None:
         if self._bullets:
             items = "".join(f"<li>{_runs_html(item)}</li>" for item in self._bullets)
-            self.blocks.append(f"<ul>{items}</ul>")
+            role = ' data-document-role="indication"' if self._in_indication else ""
+            self.blocks.append(f"<ul{role}>{items}</ul>")
         self._bullets = []
 
     def _flush(self) -> None:

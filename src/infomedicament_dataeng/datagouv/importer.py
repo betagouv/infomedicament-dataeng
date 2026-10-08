@@ -23,6 +23,7 @@ BASE_URL = "https://www.data.gouv.fr/api/1/datasets/r/"
 class ColumnDef:
     name: str
     type: str  # YAML type string, e.g. "str"
+    paragraph_separator: str | None = None
 
 
 @dataclass
@@ -62,7 +63,10 @@ def load_datasets(config_path: Path) -> dict[str, DataGouvDataset]:
                 quotechar=src.get("quotechar", '"'),
                 has_header=src.get("has_header", True),
             ),
-            columns=[ColumnDef(name=c["name"], type=c["type"]) for c in d["columns"]],
+            columns=[
+                ColumnDef(name=c["name"], type=c["type"], paragraph_separator=c.get("paragraph_separator"))
+                for c in d["columns"]
+            ],
             base_url=base_url,
         )
     return datasets
@@ -124,7 +128,13 @@ def import_dataset(dataset: DataGouvDataset, config: PostgresConfig | None = Non
     # JSON arrays from the published CSV are converted to PostgreSQL array syntax.
     buf = io.StringIO()
     for row in rows:
-        values = [_copy_value(value, column.type) for value, column in zip(row, dataset.columns, strict=True)]
+        values = [
+            _copy_value(
+                value.replace(column.paragraph_separator, "\n\n") if column.paragraph_separator else value,
+                column.type,
+            )
+            for value, column in zip(row, dataset.columns, strict=True)
+        ]
         buf.write(",".join(_csv_field(value) for value in values))
         buf.write("\n")
     buf.seek(0)

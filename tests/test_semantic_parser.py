@@ -12,6 +12,20 @@ SAMPLES = Path(__file__).parents[1] / "tmp" / "html-test"
 SAMPLES_AVAILABLE = all((SAMPLES / filename).exists() for filename in ("N0047820.htm", "N0051804.htm"))
 
 
+@pytest.mark.parametrize("encoding", [None, "utf-8", "windows-1252"])
+def test_import_repairs_windows1252_punctuation_embedded_in_utf8(encoding):
+    # The ANSM UTF-8 export contains controls inherited from Latin-1 decoding.
+    source = '<meta charset="utf-8"><p>l\x92enfant et le c\x9cur : déjà ’ œ</p>'
+    if encoding == "windows-1252":
+        source = source.replace('charset="utf-8"', 'charset="iso-8859-1"')
+        source = source.replace("\x92", "’").replace("\x9c", "œ")
+    if encoding:
+        source = source.encode(encoding)
+    document = parse_semantic_document(source)
+    assert "l’enfant et le cœur : déjà ’ œ" in document.content_html
+    assert not any("\x80" <= ch <= "\x9f" for ch in document.content_html)
+
+
 @pytest.mark.skipif(not SAMPLES_AVAILABLE, reason="handoff corpus is not checked into the repository")
 @pytest.mark.parametrize(
     ("filename", "expected_date"),
@@ -497,3 +511,42 @@ def test_parse_semantic_document_sanitizes_rich_content_and_is_deterministic():
         "fr-table__content",
     }
     assert html.find("p").get("data-document-role") is None
+
+
+@pytest.mark.parametrize(
+    "list_html",
+    [
+        "<ul><li>Première indication</li><li><strong>Deuxième indication</strong></li></ul>",
+        "<ol><li>Première indication</li><li>Deuxième indication</li></ol>",
+        '<p class="listePuce">Première indication</p><p class="listePuce">Deuxième indication</p>',
+    ],
+)
+def test_indication_marks_lists_between_paragraphs_without_including_next_section(list_html):
+    document = parse_semantic_document(f"""
+    <p class="AmmAnnexeTitre1"><a name="Ann3bQuestceque">1. Indications</a></p>
+    <p class="AmmCorpsTexte">Ce médicament est indiqué pour :</p>
+    {list_html}
+    <p class="AmmCorpsTexte">Fin des indications.</p>
+    <p class="AmmAnnexeTitre1">2. Précautions</p>
+    <ul><li>Précaution hors section</li></ul>
+    """)
+    html = BeautifulSoup(document.content_html, "html.parser")
+    marked = html.select('[data-document-role="indication"]')
+    assert [block.name for block in marked] == ["p", "ol" if list_html.startswith("<ol") else "ul", "p"]
+    assert [item.get_text(strip=True) for item in marked[1].find_all("li")] == [
+        "Première indication",
+        "Deuxième indication",
+    ]
+    assert "Précaution hors section" not in " ".join(block.get_text() for block in marked)
+
+
+def test_finalize_semantic_html_preserves_indication_list_role():
+    from infomedicament_dataeng.parsing.semantic_parser import finalize_semantic_html
+
+    document = finalize_semantic_html(
+        '<ul data-document-role="indication"><li>Une indication</li></ul>'
+        '<ul data-document-role="unknown"><li>Autre contenu</li></ul>'
+    )
+    html = BeautifulSoup(document.content_html, "html.parser")
+    assert html.ul["data-document-role"] == "indication"
+    assert html.find_all("ul")[1].get("data-document-role") is None

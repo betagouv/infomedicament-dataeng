@@ -89,7 +89,7 @@ def parse_semantic_document(
     glossary_terms: Iterable[str] = (),
 ) -> SemanticDocument:
     """Parse one complete legacy ANSM notice or RCP HTML document."""
-    html = _decode_html(source) if isinstance(source, bytes) else source
+    html = _repair_windows1252_controls(_decode_html(source) if isinstance(source, bytes) else source)
     soup = BeautifulSoup(html, "lxml")
     root = soup.body or soup
     date_notif = _extract_date(root)
@@ -209,6 +209,21 @@ def _glossary_pattern(term: str) -> str:
     return escaped.replace(r"\ ", r"[\s\u00a0]+").replace("'", "['’]")
 
 
+def _repair_windows1252_controls(source: str) -> str:
+    """Repair CP1252 bytes previously decoded as Latin-1 in ANSM UTF-8 exports.
+
+    Translate only defined CP1252 characters in the C1 range, preserving
+    already-correct Unicode and leaving undefined bytes untouched.
+    """
+    replacements = {}
+    for code in range(0x80, 0xA0):
+        try:
+            replacements[code] = bytes([code]).decode("windows-1252")
+        except UnicodeDecodeError:
+            continue
+    return source.translate(replacements)
+
+
 def _decode_html(source: bytes) -> str:
     declaration = re.search(rb"charset\s*=\s*[\"']?([A-Za-z0-9._-]+)", source[:4096], re.IGNORECASE)
     declared_encoding = declaration.group(1).decode("ascii") if declaration else None
@@ -277,7 +292,7 @@ def _extract_indication(blocks: list[Tag]) -> str | None:
 def _convert_semantics(root: Tag, indication_blocks: list[Tag]) -> None:
     for tag in root.find_all(True):
         classes = _normalized_classes(tag)
-        is_indication = tag.name in {"p", "div"} and any(tag is block for block in indication_blocks)
+        is_indication = any(tag is block for block in indication_blocks)
         # Roles are derived exclusively from recognized legacy classes.
         tag.attrs.pop("data-document-role", None)
         heading = _heading_tag(classes) if tag.name in {"p", "div"} else None
@@ -292,7 +307,7 @@ def _convert_semantics(root: Tag, indication_blocks: list[Tag]) -> None:
             tag.name = "p"
 
         document_role = "indication" if is_indication else _document_role(classes)
-        if tag.name in {"p", "h2", "h3", "h4", "h5", "h6"} and document_role is not None:
+        if tag.name in ADDRESSABLE_TAGS and document_role is not None:
             tag["data-document-role"] = document_role
 
         block_host = tag.name in {"p", "h2", "h3", "h4", "h5", "h6"}
@@ -634,6 +649,8 @@ def _sanitize(root: Tag, *, image_base_url: str, preserve_block_ids: bool) -> No
     }
     for tag in root.find_all(True):
         keep = allowed_attributes.get(tag.name, set()) | {"id"}
+        if tag.name in ADDRESSABLE_TAGS:
+            keep.add("data-document-role")
         if preserve_block_ids:
             keep.add("data-block-id")
         for attribute in list(tag.attrs):
@@ -646,7 +663,7 @@ def _sanitize(root: Tag, *, image_base_url: str, preserve_block_ids: bool) -> No
             and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", tag["data-document-date"])
         ):
             del tag.attrs["data-document-date"]
-        if tag.name in {"p", "h2", "h3", "h4", "h5", "h6"} and tag.get("data-document-role") not in DOCUMENT_ROLES:
+        if tag.name in ADDRESSABLE_TAGS and tag.get("data-document-role") not in DOCUMENT_ROLES:
             tag.attrs.pop("data-document-role", None)
         if tag.name in {"td", "th"}:
             _validate_table_attributes(tag)
