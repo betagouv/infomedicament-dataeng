@@ -1,9 +1,11 @@
 """Tests for modular resume-table builders."""
 
 from contextlib import nullcontext
+from datetime import datetime
 from unittest.mock import MagicMock
 
 import pytest
+from sqlalchemy import create_engine, text
 
 from infomedicament_dataeng.resume import builder, composants, medicines, specialties, substances
 from infomedicament_dataeng.resume.common import (
@@ -12,6 +14,8 @@ from infomedicament_dataeng.resume.common import (
     format_name,
     generic_dci,
     group_name,
+    load_atc_by_cis,
+    load_surveillance_cis,
     normalize_letter,
     normalize_numeric_id,
     replace_rows,
@@ -259,7 +263,7 @@ def test_medicine_specialty_entries_have_independent_ordered_compositions(monkey
     assert len(rows) == 1
     assert rows[0]["specialites"] == [
         ["1", "TEST 1 mg", "1", "N", "false", "substance X", "X", "X_NAME"],
-        ["2", "TEST 2 mg", "3", "C", "true", "substance X, substance Y, other X", "X,Y,X", "X_NAME,Y_NAME,X_OTHER"],
+        ["2", "TEST 2 mg", "3", "C", "true", "substance X, other X, substance Y", "X,X,Y", "X_NAME,X_OTHER,Y_NAME"],
         ["3", "TEST 3 mg", "2", "N", "false", "", "", ""],
     ]
     assert rows[0]["composants"] == "substance X"
@@ -267,17 +271,123 @@ def test_medicine_specialty_entries_have_independent_ordered_compositions(monkey
     assert rows[0]["subsNamesIds"] == ["X_NAME"]
 
 
-def test_component_selection_keeps_other_kit_elements_and_source_order():
+def test_component_selection_groups_by_component_number_across_elements():
     base = make_composant()
     other_element = make_composant(element=2)
     fraction = make_composant(nature="fraction")
     repeated = make_composant(element=2, number=2)
 
     assert composants.simple_composants([base, other_element, fraction, repeated]) == [
-        other_element,
         fraction,
         repeated,
     ]
+
+
+def test_component_selection_keeps_component_groups_together():
+    first = make_composant(number=1, name="first")
+    second = make_composant(number=2, name="second")
+    repeated = make_composant(element=2, number=1, name="repeated")
+    assert simple_composants([first, second, repeated]) == [first, repeated, second]
+
+
+@pytest.mark.parametrize(
+    ("components", "expected_ids"),
+    [
+        ([make_composant(), make_composant(substance_id="2", nature="fraction")], ["2"]),
+        ([make_composant(), make_composant(substance_id="2")], []),
+        ([make_composant(nature="fraction"), make_composant(substance_id="2", nature="fraction")], []),
+        ([make_composant(), make_composant(element=2)], []),
+        ([make_composant(), make_composant()], ["00005"]),
+    ],
+)
+def test_substance_browse_uses_single_substance_or_fraction(monkeypatch, components, expected_ids):
+    rows = []
+    monkeypatch.setattr(substances, "load_specialties", lambda conn: [Specialty("1", "TEST 1 mg", "N", "DISPONIBLE")])
+    monkeypatch.setattr(substances, "load_composants_by_cis", lambda conn: {"1": components})
+    monkeypatch.setattr(substances, "load_name_types_by_nom_id", lambda conn: {})
+    monkeypatch.setattr(substances, "replace_rows", lambda conn, table, values: rows.extend(values))
+    monkeypatch.setattr(substances, "replace_letters", lambda *args: None)
+    substances.build(None)
+    assert [row["SubsId"] for row in rows] == expected_ids
+
+
+def test_substance_browse_keeps_first_label_for_each_identity(monkeypatch):
+    rows, letters = [], []
+    monkeypatch.setattr(
+        substances,
+        "load_specialties",
+        lambda conn: [
+            Specialty("1", "FIRST 1 mg", "N", "DISPONIBLE"),
+            Specialty("2", "SECOND 1 mg", "N", "DISPONIBLE"),
+        ],
+    )
+    monkeypatch.setattr(
+        substances,
+        "load_composants_by_cis",
+        lambda conn: {"1": [make_composant(name="alpha")], "2": [make_composant(name="zeta")]},
+    )
+    monkeypatch.setattr(substances, "load_name_types_by_nom_id", lambda conn: {})
+    monkeypatch.setattr(substances, "replace_rows", lambda conn, table, values: rows.extend(values))
+    monkeypatch.setattr(substances, "replace_letters", lambda conn, target, values: letters.append(values))
+    substances.build(None)
+    assert rows[0]["NomLib"] == "alpha"
+    assert rows[0]["specialites"] == 2
+    assert letters == [{"A"}]
+
+
+def test_pregnancy_alert_includes_base_hidden_by_fraction(monkeypatch):
+    rows = []
+    base = make_composant(substance_id="004179", name="base")
+    fraction = make_composant(substance_id="2", nature="fraction", name="fraction")
+    monkeypatch.setattr(specialties, "load_specialties", lambda conn: [Specialty("1", "TEST 1 mg", "N", "DISPONIBLE")])
+    monkeypatch.setattr(specialties, "load_composants_by_cis", lambda conn: {"1": [base, fraction]})
+    monkeypatch.setattr(specialties, "load_main_names_by_subs_id", lambda conn: {})
+    monkeypatch.setattr(specialties, "load_indications", lambda conn: [])
+    monkeypatch.setattr(specialties, "load_atc_by_cis", lambda conn: {})
+    monkeypatch.setattr(specialties, "load_surveillance_cis", lambda conn: set())
+    monkeypatch.setattr(specialties, "_load_alerts", lambda conn: ({"4179"}, set(), {}))
+    monkeypatch.setattr(specialties, "replace_rows", lambda conn, table, values: rows.extend(values))
+    specialties.build(None)
+    assert rows[0]["subsIds"] == ["2"]
+    assert rows[0]["isAlertPregnancyPlan"] is True
+
+
+def test_atc_lookup_uses_legacy_postgres_catalog_and_first_result():
+    engine = create_engine("sqlite://")
+    with engine.begin() as conn:
+        conn.execute(text("CREATE TABLE cis_atc (code_cis TEXT, code_terme_atc TEXT)"))
+        conn.execute(text("CREATE TABLE atc (code_terme TEXT, code TEXT)"))
+        conn.execute(text("INSERT INTO atc VALUES ('second', 'Z01AB01'), ('first', 'A01AA01'), ('empty', NULL)"))
+        conn.execute(text("INSERT INTO cis_atc VALUES ('1', 'second'), ('1', 'first'), ('2', 'empty'), ('2', 'first')"))
+        assert load_atc_by_cis(conn) == {"1": "Z01AB01", "2": None}
+
+
+@pytest.mark.parametrize(
+    ("now", "expected"),
+    [
+        (datetime(2026, 10, 15, 0), set()),
+        (datetime(2026, 10, 15, 12), {"1"}),
+        (datetime(2026, 10, 16, 0), set()),
+    ],
+)
+def test_surveillance_uses_current_time_and_strict_boundaries(now, expected):
+    engine = create_engine("sqlite://")
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "CREATE TABLE ansm_specialite_evenement"
+                " (cis TEXT, code_evenement INTEGER, date_evenement TIMESTAMP, date_echeance TIMESTAMP)"
+            )
+        )
+        conn.execute(
+            text("INSERT INTO ansm_specialite_evenement VALUES (:cis, :code, :start, :end)"),
+            [
+                {"cis": "1", "code": 83, "start": datetime(2026, 10, 15), "end": datetime(2026, 10, 16)},
+                {"cis": "2", "code": 84, "start": datetime(2026, 10, 15), "end": datetime(2026, 10, 16)},
+                {"cis": "3", "code": 83, "start": datetime(2026, 10, 15), "end": None},
+            ],
+        )
+        assert load_surveillance_cis(conn, now=now) == expected
 
 
 def test_component_mapping_cleans_display_without_changing_source():
