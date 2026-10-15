@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from dataclasses import dataclass
-from datetime import date
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import bindparam, text
@@ -118,27 +118,27 @@ def indications_for_cis(indications: list[tuple[int, str, set[str]]], cis_values
     return [(identifier, name) for identifier, name, linked_cis in indications if linked_cis & selected_cis]
 
 
-def load_atc_by_cis(conn) -> dict[str, str]:
+def load_atc_by_cis(conn) -> dict[str, str | None]:
     rows = conn.execute(
         text(
-            "SELECT DISTINCT ON (specialty_atc.cis) specialty_atc.cis, atc.libelle_abr AS code"
-            " FROM ansm_specialite_atc specialty_atc"
-            " JOIN ansm_atc atc ON atc.code = specialty_atc.code_atc"
-            " WHERE atc.libelle_abr IS NOT NULL"
-            " ORDER BY specialty_atc.cis, specialty_atc.code_atc"
+            "SELECT cis_atc.code_cis AS cis, atc.code FROM cis_atc JOIN atc ON atc.code_terme = cis_atc.code_terme_atc"
         )
     ).mappings()
-    return {str(row["cis"]): row["code"] for row in rows}
+    codes = {}
+    for row in rows:
+        # Match getAtcCode: keep the first joined result, including a null code.
+        codes.setdefault(str(row["cis"]), row["code"])
+    return codes
 
 
-def load_surveillance_cis(conn, today: date | None = None) -> set[str]:
-    current_date = today or date.today()
+def load_surveillance_cis(conn, now: datetime | None = None) -> set[str]:
+    current_time = now or datetime.now()
     rows = conn.execute(
         text(
             "SELECT DISTINCT cis FROM ansm_specialite_evenement"
-            " WHERE code_evenement = 83 AND :today > date_evenement AND :today < date_echeance"
+            " WHERE code_evenement = 83 AND :now > date_evenement AND :now < date_echeance"
         ),
-        {"today": current_date},
+        {"now": current_time},
     ).scalars()
     return {str(cis) for cis in rows}
 

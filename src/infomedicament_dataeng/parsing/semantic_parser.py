@@ -147,6 +147,7 @@ def _finalize_semantic_root(
     _strip_o_bullet_markers(root)
     _annotate_glossary_terms(root, glossary_terms)
     _remove_empty_blocks(root)
+    _normalize_tables(root)
     _wrap_tables(root)
     _assign_block_ids(root)
     _sanitize(root, image_base_url=image_base_url, preserve_block_ids=True)
@@ -568,6 +569,56 @@ def _remove_empty_blocks(root: Tag) -> None:
     for tag in reversed(root.find_all(empty_candidate_tags)):
         if not tag.get_text(strip=True) and not tag.find("img"):
             tag.decompose()
+
+
+def _normalize_tables(root: Tag) -> None:
+    """Give tables explicit bodies and repair legacy all-in-thead tables.
+
+    Run after empty-block cleanup so a header-only table retains its empty body.
+    In a lone thead, retain the first row plus explicit th header rows and rows
+    covered by header rowspans. Legacy exports also put data rows in that group;
+    move the remaining rows into a body. Existing bodies are left intact.
+    """
+    factory = BeautifulSoup("", "html.parser")
+    for table in root.find_all("table"):
+        heads = table.find_all("thead", recursive=False)
+        if (
+            len(heads) == 1
+            and table.find("tbody", recursive=False) is None
+            and table.find("tr", recursive=False) is None
+        ):
+            head = heads[0]
+            rows = head.find_all("tr", recursive=False)
+            header_end = 1
+            for index, row in enumerate(rows):
+                cells = row.find_all(["td", "th"], recursive=False)
+                if index >= header_end and not (cells and all(cell.name == "th" for cell in cells)):
+                    break
+                header_end = max(header_end, index + 1, *(index + int(cell.get("rowspan", 1)) for cell in cells))
+            body = factory.new_tag("tbody")
+            head.insert_after(body)
+            for row in rows[header_end:]:
+                body.append(row.extract())
+
+        body = None
+        for child in list(table.children):
+            if not isinstance(child, Tag):
+                continue
+            if child.name != "tr":
+                body = None
+                continue
+            if body is None:
+                body = factory.new_tag("tbody")
+                child.insert_before(body)
+            body.append(child.extract())
+
+        if table.find("tbody", recursive=False) is None:
+            body = factory.new_tag("tbody")
+            footer = table.find("tfoot", recursive=False)
+            if footer is not None:
+                footer.insert_before(body)
+            else:
+                table.append(body)
 
 
 def _wrap_tables(root: Tag) -> None:

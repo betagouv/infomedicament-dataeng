@@ -49,7 +49,8 @@ def build(conn) -> int:
 
     rows = []
     for specialty in specialties:
-        composants = simple_composants(composants_by_cis.get(specialty.cis, []))
+        raw_composants = composants_by_cis.get(specialty.cis, [])
+        composants = simple_composants(raw_composants)
         indication_values = indications_for_cis(indications, [specialty.cis])
         atc = atc_by_cis.get(specialty.cis)
         composant_names = [composant.name.strip() for composant in composants]
@@ -58,7 +59,7 @@ def build(conn) -> int:
             for composant in composants
         ]
         composant_ids = {
-            normalized for composant in composants if (normalized := normalize_numeric_id(composant.substance_id))
+            normalized for composant in raw_composants if (normalized := normalize_numeric_id(composant.substance_id))
         }
         rows.append(
             {

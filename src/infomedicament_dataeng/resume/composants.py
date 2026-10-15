@@ -107,15 +107,14 @@ def clean_component_display_name(value: str) -> str:
 
 
 def simple_composants(composants: list[Composant]) -> list[Composant]:
-    fraction_keys = {
-        (composant.element_number, composant.composant_number)
-        for composant in composants
-        if composant.nature == "fraction"
-    }
+    # displaySimpleComposants groups by CompNum alone, even across kit elements.
+    groups: dict[int, list[Composant]] = defaultdict(list)
+    for composant in composants:
+        groups[composant.composant_number].append(composant)
     return [
         composant
-        for composant in composants
-        if composant.nature == "fraction" or (composant.element_number, composant.composant_number) not in fraction_keys
+        for group in groups.values()
+        for composant in ([item for item in group if item.nature == "fraction"] or group)
     ]
 
 

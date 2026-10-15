@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from bs4 import BeautifulSoup
 
-from infomedicament_dataeng.parsing.semantic_parser import parse_semantic_document
+from infomedicament_dataeng.parsing.semantic_parser import finalize_semantic_html, parse_semantic_document
 
 SAMPLES = Path(__file__).parents[1] / "tmp" / "html-test"
 SAMPLES_AVAILABLE = all((SAMPLES / filename).exists() for filename in ("N0047820.htm", "N0051804.htm"))
@@ -361,6 +361,100 @@ def test_parse_semantic_document_adds_dsfr_table_and_alert_markup():
     assert table.parent.parent.parent.parent["class"] == ["fr-table"]
     assert html.find("div", class_="untrusted") is None
     assert "Regular content" in html.get_text()
+
+
+@pytest.mark.parametrize("parse", [parse_semantic_document, finalize_semantic_html])
+@pytest.mark.parametrize(
+    ("source", "header_text", "body_text"),
+    [
+        ("<table><tr><td>Value</td></tr></table>", "", "Value"),
+        (
+            "<table><thead><tr><th>Heading</th></tr></thead><tr><td>Value</td></tr></table>",
+            "Heading",
+            "Value",
+        ),
+        ("<table><thead><tr><td>Value</td></tr></thead></table>", "Value", ""),
+        (
+            '<table><thead><tr><th scope="col">Heading</th></tr>'
+            '<tr><td rowspan="2">Value</td></tr><tr><td>Other</td></tr></thead></table>',
+            "Heading",
+            "ValueOther",
+        ),
+        ("<table><thead><tr><th>Heading</th></tr></thead></table>", "Heading", ""),
+        (
+            "<table><thead><tr><th>Heading</th></tr></thead><tbody><tr><td></td></tr></tbody></table>",
+            "Heading",
+            "",
+        ),
+        (
+            "<table><thead><tr><td>Heading</td></tr></thead><tbody><tr><td>Value</td></tr></tbody></table>",
+            "Heading",
+            "Value",
+        ),
+        (
+            "<table><thead><tr><th>Group</th></tr><tr><th>Heading</th></tr></thead></table>",
+            "GroupHeading",
+            "",
+        ),
+        (
+            '<table><thead><tr><td rowspan="2">Group</td><td>Heading</td></tr>'
+            "<tr><td>Subheading</td></tr><tr><td>Value</td></tr></thead></table>",
+            "GroupHeadingSubheading",
+            "Value",
+        ),
+    ],
+)
+def test_tables_have_explicit_bodies_without_losing_content(parse, source, header_text, body_text):
+    result = parse(source).content_html
+    table = BeautifulSoup(result, "html.parser").find("table")
+    body = table.find("tbody", recursive=False)
+    head = table.find("thead", recursive=False)
+
+    assert body is not None
+    assert body.get_text(strip=True) == body_text
+    assert (head.get_text(strip=True) if head else "") == header_text
+    assert not table.find("tr", recursive=False)
+    assert table.get_text(strip=True) == BeautifulSoup(source, "html.parser").get_text(strip=True)
+    if table.find("td", rowspan=True):
+        assert table.find("td", rowspan=True)["rowspan"] == "2"
+    if table.find("th", scope=True):
+        assert table.find("th", scope=True)["scope"] == "col"
+    assert finalize_semantic_html(result).content_html == result
+
+
+def test_table_normalization_keeps_nested_rows_and_footer_in_place():
+    source = """
+    <table><thead><tr><th>Heading</th></tr></thead>
+    <tr><td>Outer<table><thead><tr><td>Inner</td></tr></thead></table></td></tr>
+    <tfoot><tr><td>Footer</td></tr></tfoot></table>
+    """
+    html = BeautifulSoup(parse_semantic_document(source).content_html, "html.parser")
+    outer, inner = html.find_all("table")
+
+    assert [tag.name for tag in outer.find_all(recursive=False)] == ["thead", "tbody", "tfoot"]
+    assert len(outer.find("tbody", recursive=False).find_all("tr", recursive=False)) == 1
+    assert inner.find("tbody", recursive=False) is not None
+    assert inner.find("thead", recursive=False).get_text() == "Inner"
+    assert outer.find("tfoot").get_text() == "Footer"
+
+
+@pytest.mark.parametrize("kind", ["notice", "rcp"])
+@pytest.mark.parametrize("parse", [parse_semantic_document, finalize_semantic_html])
+def test_legacy_60477650_table_does_not_treat_dosage_rows_as_headers(kind, parse):
+    # First table from https://annexes.ansm.yohanboniface.me/{kind}/50/60477650.html.
+    source = (Path(__file__).parent / "fixtures" / f"60477650-{kind}-table.html").read_text(encoding="utf-8")
+    source_rows = BeautifulSoup(source, "html.parser").find_all("tr")
+    result = parse(source).content_html
+    table = BeautifulSoup(result, "html.parser").find("table")
+
+    assert len(table.select("thead > tr")) == 1
+    assert len(table.select("tbody > tr")) == 5
+    assert [row.get_text(" ", strip=True) for row in table.find_all("tr")] == [
+        row.get_text(" ", strip=True) for row in source_rows
+    ]
+    reparsed = BeautifulSoup(finalize_semantic_html(result).content_html, "html.parser")
+    assert len(reparsed.select("thead > tr")) == 1
+    assert len(reparsed.select("tbody > tr")) == 5
 
 
 def test_parse_semantic_document_removes_word_noise_but_keeps_footnote_meaning():
