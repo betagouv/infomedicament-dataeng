@@ -61,19 +61,21 @@ def iter_pediatric_rcps(
     engine = get_postgres_engine(config)
     query = text(
         """
-        SELECT r."codeCIS"::text AS cis,
+        SELECT CAST(r."codeCIS" AS text) AS cis,
                r.content_html,
                (
-                   SELECT ca.code_terme_atc
-                   FROM cis_atc ca
-                   WHERE ca.code_cis::text = r."codeCIS"::text
-                   ORDER BY ca.code_terme_atc
+                   SELECT atc.libelle_abr
+                   FROM ansm_specialite_atc specialty_atc
+                   JOIN ansm_atc atc ON atc.code = specialty_atc.code_atc
+                   WHERE specialty_atc.cis = CAST(r."codeCIS" AS text)
+                     AND atc.libelle_abr IS NOT NULL AND atc.libelle_abr <> ''
+                   ORDER BY atc.libelle_abr, atc.code
                    LIMIT 1
                ) AS atc_code
         FROM rcp r
         WHERE r.content_html IS NOT NULL
           AND btrim(r.content_html) <> ''
-          AND (:cis IS NULL OR r."codeCIS"::text = :cis)
+          AND (:cis IS NULL OR CAST(r."codeCIS" AS text) = :cis)
         ORDER BY r."codeCIS"
         LIMIT :limit
         """

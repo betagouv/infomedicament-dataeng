@@ -121,12 +121,16 @@ def indications_for_cis(indications: list[tuple[int, str, set[str]]], cis_values
 def load_atc_by_cis(conn) -> dict[str, str | None]:
     rows = conn.execute(
         text(
-            "SELECT cis_atc.code_cis AS cis, atc.code FROM cis_atc JOIN atc ON atc.code_terme = cis_atc.code_terme_atc"
+            "SELECT specialty_atc.cis, atc.libelle_abr AS code"
+            " FROM ansm_specialite_atc specialty_atc JOIN ansm_atc atc ON atc.code = specialty_atc.code_atc"
+            " WHERE atc.libelle_abr IS NOT NULL AND atc.libelle_abr <> ''"
+            " ORDER BY specialty_atc.cis, atc.libelle_abr, atc.code"
         )
     ).mappings()
     codes = {}
     for row in rows:
-        # Match getAtcCode: keep the first joined result, including a null code.
+        # Match getAtcCode and the pediatric reader: the first nonempty public ATC
+        # code in alphabetical order is the stable primary mapping.
         codes.setdefault(str(row["cis"]), row["code"])
     return codes
 
