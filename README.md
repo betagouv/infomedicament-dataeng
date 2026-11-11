@@ -198,7 +198,7 @@ Both commands accept `--cis` and `--limite`. `centralise fetch` also accepts `--
 
 ## Pediatric classification
 
-Classify medicines from semantic RCP HTML stored in PostgreSQL. The command reads `rcp.content_html` directly and uses `cis_atc` for the contraceptive ATC rule; it does not read JSONL or S3 document exports.
+Classify medicines from semantic RCP HTML stored in PostgreSQL. The command reads `rcp.content_html` directly and joins `ansm_specialite_atc` to `ansm_atc` for the contraceptive ATC rule (the public code is `libelle_abr`, not the numeric catalog key); it does not read JSONL or S3 document exports.
 
 ```bash
 uv run infomedicament-dataeng classify-pediatric \

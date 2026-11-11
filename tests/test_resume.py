@@ -352,14 +352,18 @@ def test_pregnancy_alert_includes_base_hidden_by_fraction(monkeypatch):
     assert rows[0]["isAlertPregnancyPlan"] is True
 
 
-def test_atc_lookup_uses_legacy_postgres_catalog_and_first_result():
+def test_atc_lookup_uses_ansm_public_code_and_stable_primary_mapping():
     engine = create_engine("sqlite://")
     with engine.begin() as conn:
-        conn.execute(text("CREATE TABLE cis_atc (code_cis TEXT, code_terme_atc TEXT)"))
-        conn.execute(text("CREATE TABLE atc (code_terme TEXT, code TEXT)"))
-        conn.execute(text("INSERT INTO atc VALUES ('second', 'Z01AB01'), ('first', 'A01AA01'), ('empty', NULL)"))
-        conn.execute(text("INSERT INTO cis_atc VALUES ('1', 'second'), ('1', 'first'), ('2', 'empty'), ('2', 'first')"))
-        assert load_atc_by_cis(conn) == {"1": "Z01AB01", "2": None}
+        conn.execute(text("CREATE TABLE ansm_specialite_atc (cis TEXT, code_atc INTEGER)"))
+        conn.execute(text("CREATE TABLE ansm_atc (code INTEGER, libelle_abr TEXT)"))
+        conn.execute(
+            text("INSERT INTO ansm_atc VALUES (1, 'Z01AB01'), (9, 'A01AA01'), (0, 'G03AA07'), (3, NULL), (4, '')")
+        )
+        conn.execute(
+            text("INSERT INTO ansm_specialite_atc VALUES ('1', 1), ('1', 9), ('2', 3), ('2', 9), ('3', 0), ('4', 4)")
+        )
+        assert load_atc_by_cis(conn) == {"1": "A01AA01", "2": "A01AA01", "3": "G03AA07"}
 
 
 @pytest.mark.parametrize(
