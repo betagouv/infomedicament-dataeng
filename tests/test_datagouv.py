@@ -80,7 +80,7 @@ class TestLoadDatasets:
 
         assert list(datasets) == LOAD_ORDER
         assert all(dataset.postgresql_table == f"ansm_{name}" for name, dataset in datasets.items())
-        assert all(dataset.base_url == "https://demo.data.gouv.fr/api/1/datasets/r/" for dataset in datasets.values())
+        assert all(dataset.base_url == "https://www.data.gouv.fr/api/1/datasets/r/" for dataset in datasets.values())
 
 
 # ---------------------------------------------------------------------------
