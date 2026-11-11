@@ -1,8 +1,8 @@
-base_url: https://demo.data.gouv.fr/api/1/datasets/r/
+base_url: https://www.data.gouv.fr/api/1/datasets/r/
 
 datasets:
   specialite:
-    datagouv_dataset_id: "a2c9e0d7-14ae-4a6c-9081-c9a37ab15398"
+    datagouv_dataset_id: "4e57bd7c-c2d3-487b-b40c-e4be810c9756"
     postgresql_table: ansm_specialite
     source: &csv
       type: csv
@@ -21,7 +21,7 @@ datasets:
       - {name: een, type: str}
 
   atc:
-    datagouv_dataset_id: "4d1798ee-20fb-4c8a-9043-e454a6ddafdf"
+    datagouv_dataset_id: "cb619822-af78-4de0-ad10-1cedaef0891b"
     postgresql_table: ansm_atc
     source: *csv
     columns:
@@ -33,7 +33,7 @@ datasets:
       - {name: libelle_anglais, type: str}
 
   classe_clinique:
-    datagouv_dataset_id: "02f362c6-9006-4178-b294-497c6c050c9f"
+    datagouv_dataset_id: "bd7c7601-c723-4619-a79a-295a8ecd8990"
     postgresql_table: ansm_classe_clinique
     source: *csv
     columns:
@@ -42,7 +42,7 @@ datasets:
       - {name: libelle_long, type: str}
 
   pathologie:
-    datagouv_dataset_id: "a340977c-6380-4829-8bab-8e99a630459d"
+    datagouv_dataset_id: "53e6b881-0a62-405b-8665-321f3a49f33e"
     postgresql_table: ansm_pathologie
     source: *csv
     columns:
@@ -52,7 +52,7 @@ datasets:
       - {name: information, type: str}
 
   delivrance:
-    datagouv_dataset_id: "e1e59c0b-8e53-45e5-856f-f136ad2d0ae5"
+    datagouv_dataset_id: "a4679217-00cf-4d9e-a5f5-a65dce13a945"
     postgresql_table: ansm_delivrance
     source: *csv
     columns:
@@ -61,7 +61,7 @@ datasets:
       - {name: libelle_long, type: str}
 
   groupe_substance:
-    datagouv_dataset_id: "d460a051-a875-45f1-b911-b5ac31397182"
+    datagouv_dataset_id: "e0f5244b-800e-47dd-8765-143e9ac931f6"
     postgresql_table: ansm_groupe_substance
     source: *csv
     columns:
@@ -71,7 +71,7 @@ datasets:
       - {name: date_modification, type: datetime}
 
   classe_interaction:
-    datagouv_dataset_id: "4f2fd55f-70ab-4cab-ad80-5fc271204e78"
+    datagouv_dataset_id: "d6c603cd-0317-49dc-b18a-35d7f3db3b6f"
     postgresql_table: ansm_classe_interaction
     source: *csv
     columns:
@@ -81,7 +81,7 @@ datasets:
       - {name: date_modification, type: datetime}
 
   substance_nom:
-    datagouv_dataset_id: "3b8167cf-8f4e-4cb4-a6cc-59a027862f1d"
+    datagouv_dataset_id: "e971f1fc-c915-4d8b-9e46-124e9878d1a6"
     postgresql_table: ansm_substance_nom
     source: *csv
     columns:
@@ -91,7 +91,7 @@ datasets:
       - {name: type, type: str}
 
   presentation:
-    datagouv_dataset_id: "68a832f6-9610-4c31-bd74-abdbe3d53ff4"
+    datagouv_dataset_id: "62434987-737e-40c7-853b-ef3a9e78cd61"
     postgresql_table: ansm_presentation
     source: *csv
     columns:
@@ -106,7 +106,7 @@ datasets:
       - {name: statut, type: str}
 
   presentation_evenement:
-    datagouv_dataset_id: "6f7aba25-1976-4047-b10e-e55e7ee75d1b"
+    datagouv_dataset_id: "7e0ec58a-4244-462d-bae0-dfa3721cf98b"
     postgresql_table: ansm_presentation_evenement
     source: *csv
     columns:
@@ -120,7 +120,7 @@ datasets:
       - {name: date_modification, type: datetime}
 
   element:
-    datagouv_dataset_id: "209d170d-db63-4f24-9581-28698482f90d"
+    datagouv_dataset_id: "f11d26a8-8bf5-4f43-af18-28500c24966b"
     postgresql_table: ansm_element
     source: *csv
     columns:
@@ -130,7 +130,7 @@ datasets:
       - {name: ordre, type: int}
 
   specialite_atc:
-    datagouv_dataset_id: "b7d0ebd4-25cd-4378-9189-1fa1a5a5f4a8"
+    datagouv_dataset_id: "36f1190d-bd99-44e7-abe3-d2e8178dd7ae"
     postgresql_table: ansm_specialite_atc
     source: *csv
     columns:
@@ -138,7 +138,7 @@ datasets:
       - {name: code_atc, type: int}
 
   specialite_classe_clinique:
-    datagouv_dataset_id: "8720e167-d3f8-4d97-928d-dc740b7b02b4"
+    datagouv_dataset_id: "debb3416-74e4-48bf-84ca-2f262579e150"
     postgresql_table: ansm_specialite_classe_clinique
     source: *csv
     columns:
@@ -146,7 +146,7 @@ datasets:
       - {name: code_classe_clinique, type: int}
 
   classe_clinique_pathologie:
-    datagouv_dataset_id: "11546dfa-623c-4b20-b244-bb5317760c2e"
+    datagouv_dataset_id: "a5c60672-37f1-4206-b84d-ee865b2f1f19"
     postgresql_table: ansm_classe_clinique_pathologie
     source: *csv
     columns:
@@ -154,7 +154,7 @@ datasets:
       - {name: code_pathologie, type: int}
 
   specialite_delivrance:
-    datagouv_dataset_id: "b1148657-4f67-4d3c-bf5b-15ec3c6fb390"
+    datagouv_dataset_id: "e1b89c63-fe3d-4084-9362-dcace05ee326"
     postgresql_table: ansm_specialite_delivrance
     source: *csv
     columns:
@@ -162,7 +162,7 @@ datasets:
       - {name: code_delivrance, type: int}
 
   specialite_evenement:
-    datagouv_dataset_id: "1feb0fe5-8a09-4bf4-9d53-db15d686ff39"
+    datagouv_dataset_id: "8031dd40-9cdb-40aa-b89f-6789c8c32260"
     postgresql_table: ansm_specialite_evenement
     source: *csv
     columns:
@@ -176,7 +176,7 @@ datasets:
       - {name: date_modification, type: datetime}
 
   classe_groupe_substance:
-    datagouv_dataset_id: "50dca768-2ff0-43aa-876d-9c5ce251c54a"
+    datagouv_dataset_id: "4197ddb6-8c56-4d83-90ec-a04924841c62"
     postgresql_table: ansm_classe_groupe_substance
     source: *csv
     columns:
@@ -184,7 +184,7 @@ datasets:
       - {name: code_groupe, type: int}
 
   substance_groupe_substance:
-    datagouv_dataset_id: "39ed0e6e-d523-4fb6-832c-6b5609fd8ae1"
+    datagouv_dataset_id: "a69a2756-71d7-4668-a48b-96a80944579c"
     postgresql_table: ansm_substance_groupe_substance
     source: *csv
     columns:
@@ -193,7 +193,7 @@ datasets:
       - {name: date_modification, type: datetime}
 
   interaction:
-    datagouv_dataset_id: "c2049ad1-3a3d-4d66-a13f-f0128151687a"
+    datagouv_dataset_id: "5c450f7b-7fb3-478d-9568-c0618a672016"
     postgresql_table: ansm_interaction
     source: *csv
     columns:
@@ -208,7 +208,7 @@ datasets:
       - {name: date_modification, type: datetime}
 
   groupe_generique:
-    datagouv_dataset_id: "33481bee-75de-46e7-9ad1-0174d4cc9b47"
+    datagouv_dataset_id: "14af0ac0-b65c-4e81-98d5-40a916061834"
     postgresql_table: ansm_groupe_generique
     source: *csv
     columns:
@@ -219,7 +219,7 @@ datasets:
       - {name: commentaire, type: str}
 
   specialite_groupe_generique:
-    datagouv_dataset_id: "97ea4d4c-4e2f-456a-9a3d-f8fabc14927c"
+    datagouv_dataset_id: "4781731b-11c8-470d-bf8b-5df02eb48f24"
     postgresql_table: ansm_specialite_groupe_generique
     source: *csv
     columns:
@@ -229,7 +229,7 @@ datasets:
       - {name: rang, type: int}
 
   composant:
-    datagouv_dataset_id: "6efdfbce-f474-40aa-96d3-8b79cfe85348"
+    datagouv_dataset_id: "396a593b-08f6-41a2-89e7-9ba7e864929c"
     postgresql_table: ansm_composant
     source: *csv
     columns:
@@ -243,7 +243,7 @@ datasets:
       - {name: ordre, type: int}
 
   recipient:
-    datagouv_dataset_id: "8dd0372a-d142-4a3d-a254-3e485e73e425"
+    datagouv_dataset_id: "f7d314dd-766e-4eaa-9fdb-2dccc42ac5fd"
     postgresql_table: ansm_recipient
     source: *csv
     columns:
@@ -257,7 +257,7 @@ datasets:
       - {name: unite_contenance, type: str}
 
   dispositif:
-    datagouv_dataset_id: "3bf05239-879d-4055-8f38-397069470d3a"
+    datagouv_dataset_id: "24d484cd-9b31-4f6a-ba3a-c12e36df3417"
     postgresql_table: ansm_dispositif
     source: *csv
     columns:
@@ -267,7 +267,7 @@ datasets:
       - {name: nature_dispositif, type: str}
 
   document:
-    datagouv_dataset_id: "989e4524-b7e5-44f3-bfff-0e62c0ac2199"
+    datagouv_dataset_id: "e155d807-5bff-491f-b0ba-31e6d33f8c18"
     postgresql_table: ansm_document
     source: *csv
     columns:
@@ -280,7 +280,7 @@ datasets:
       - {name: images, type: array}
 
   caracteristique:
-    datagouv_dataset_id: "a1f7ee85-b4da-44a4-bacc-7542a26f38fe"
+    datagouv_dataset_id: "5f6fa629-2c0a-48f8-b35e-ba1fb11385f3"
     postgresql_table: ansm_caracteristique
     source: *csv
     columns:
@@ -291,7 +291,7 @@ datasets:
       - {name: libelle, type: str}
 
   specialite_titulaire:
-    datagouv_dataset_id: "32f9dce5-02a0-4678-8bae-5e6bba10ee48"
+    datagouv_dataset_id: "cc737ef8-8753-4f66-bda1-5883211093ef"
     postgresql_table: ansm_specialite_titulaire
     source: *csv
     columns:
@@ -303,7 +303,7 @@ datasets:
       - {name: date_debut, type: date}
 
   excipient_effet_notoire:
-    datagouv_dataset_id: "521ead02-63a8-4190-9e72-85e2dc06bd47"
+    datagouv_dataset_id: "edfbebb9-279b-4d22-b7f4-a0ec9b3d02b2"
     postgresql_table: ansm_excipient_effet_notoire
     source: *csv
     columns:
@@ -311,7 +311,7 @@ datasets:
       - {name: libelle, type: str}
 
   specialite_excipient_effet_notoire:
-    datagouv_dataset_id: "227c388f-cbfc-48f3-9eb1-9dc3dae1c8d9"
+    datagouv_dataset_id: "6fd7421f-189f-4f4a-bc92-10a4fee0150d"
     postgresql_table: ansm_specialite_excipient_effet_notoire
     source: *csv
     columns:
