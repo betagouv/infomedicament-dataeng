@@ -267,6 +267,8 @@ class TestNoticeHeaderDetection:
     def test_matches_both_qrd_wordings(self):
         assert _is_notice_header("Notice: Information de l’utilisateur")  # Abasaglar
         assert _is_notice_header("Notice : Information du patient")  # Brintellix
+        assert _is_notice_header("NOTICE : INFORMATION DU PATIENT")
+        assert _is_notice_header("notice : information du patient")
 
     def test_rejects_non_headers(self):
         assert not _is_notice_header("Que contient cette notice?")
