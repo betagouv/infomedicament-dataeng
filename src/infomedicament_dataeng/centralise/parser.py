@@ -104,7 +104,8 @@ def _runs_html(runs: list[TextRun]) -> str:
 def _is_notice_header(text: str) -> bool:
     """Match the QRD notice header across wordings:
     'Notice: Information de l'utilisateur' / 'Notice : Information du patient'."""
-    return text.startswith("Notice") and "information" in text.lower()
+    normalized = text.casefold()
+    return normalized.startswith("notice") and "information" in normalized
 
 
 class _SemanticHtmlBuilder:
