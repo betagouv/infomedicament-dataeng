@@ -90,13 +90,6 @@ def load_composants_by_cis(conn) -> dict[str, list[Composant]]:
     return dict(mapped)
 
 
-def load_main_names_by_subs_id(conn) -> dict[str, str]:
-    rows = conn.execute(text("SELECT code_substance, nom, type FROM ansm_substance_nom")).mappings()
-    return {
-        (row["code_substance"] or "").strip(): (row["nom"] or "").strip() for row in rows if row["type"] == "CANONIQUE"
-    }
-
-
 def load_name_types_by_nom_id(conn) -> dict[str, str | None]:
     rows = conn.execute(text("SELECT code_nom, type FROM ansm_substance_nom")).mappings()
     return {(row["code_nom"] or "").strip(): row["type"] for row in rows}

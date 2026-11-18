@@ -15,9 +15,9 @@ from .common import (
 from .composants import (
     display_composants,
     load_composants_by_cis,
-    load_main_names_by_subs_id,
     simple_composants,
 )
+from .titles import load_titles_by_subs_id, page_title
 
 
 def _load_alerts(conn) -> tuple[set[str], set[str], dict[str, bool]]:
@@ -41,7 +41,7 @@ def _load_alerts(conn) -> tuple[set[str], set[str], dict[str, bool]]:
 def build(conn) -> int:
     specialties = load_specialties(conn)
     composants_by_cis = load_composants_by_cis(conn)
-    main_names_by_subs_id = load_main_names_by_subs_id(conn)
+    titles_by_subs_id = load_titles_by_subs_id(conn)
     indications = load_indications(conn)
     atc_by_cis = load_atc_by_cis(conn)
     surveillance_cis = load_surveillance_cis(conn)
@@ -53,11 +53,6 @@ def build(conn) -> int:
         composants = simple_composants(raw_composants)
         indication_values = indications_for_cis(indications, [specialty.cis])
         atc = atc_by_cis.get(specialty.cis)
-        composant_names = [composant.name.strip() for composant in composants]
-        main_names = [
-            main_names_by_subs_id.get(composant.substance_id.strip(), composant.name.strip())
-            for composant in composants
-        ]
         composant_ids = {
             normalized for composant in raw_composants if (normalized := normalize_numeric_id(composant.substance_id))
         }
@@ -68,7 +63,7 @@ def build(conn) -> int:
                 "groupName": group_name(specialty.denomination),
                 "composants": display_composants(composants),
                 "subsIds": [composant.substance_id.strip() for composant in composants],
-                "subsMainNames": ", ".join(main_names) if composant_names != main_names else None,
+                "subsTitle": page_title([composant.substance_id for composant in composants], titles_by_subs_id),
                 "indicationsIds": [value[0] for value in indication_values],
                 "indicationsIdsNames": [[str(value[0]), value[1]] for value in indication_values],
                 "atc1Code": atc[:1] if atc else None,
