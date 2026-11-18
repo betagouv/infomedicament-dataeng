@@ -182,6 +182,8 @@ uv run infomedicament-dataeng build-resume
 
 Individual outputs can be rebuilt with `--target indications`, `substances`, `generiques`, `medicaments`, or `specialites`. Each output table and its associated alphabetic navigation row are replaced in one transaction. The builders use only PostgreSQL `ansm_*`, `ref_*`, and `indications` tables; they do not access the legacy MySQL database.
 
+Rows are inserted in batches of up to 500 to reduce network round trips. Each table logs its start and, after committing, its row count and elapsed time. All batches for a table share the same transaction, so an interrupted or failed rebuild rolls back that table's replacement.
+
 The `substances` builder retains names used by visible specialties, including combinations and kits. Names without a qualifying single-substance specialty are stored with `specialites = 0`; only names with positive counts contribute to alphabetic navigation.
 
 The `substances` builder also fills `resume_substances.title`, and `specialites` fills `resume_specialites.subsTitle`, using the title rules from [infomedicament PR #287](https://github.com/betagouv/infomedicament/pull/287). Titles prefer a canonical name, excluding names starting with `(NE PAS UTILISER)` when alternatives exist, then fall back to the lowest numeric name ID. Substances without catalog names use the first nonempty composition label sorted by label. HTML entities and extra whitespace are cleaned. Specialty titles preserve substance order and duplicates; unresolved substances produce a null title. These fields are computed within each builder's transaction without a separate title-seeding step.

@@ -5,7 +5,8 @@ from datetime import datetime
 from unittest.mock import MagicMock
 
 import pytest
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, event, text
+from sqlalchemy.exc import IntegrityError
 
 from infomedicament_dataeng.resume import builder, composants, medicines, specialties, substances
 from infomedicament_dataeng.resume.common import (
@@ -430,10 +431,48 @@ def test_replace_rows_quotes_application_column_names():
     replace_rows(conn, "resume_specialites", [{"specId": "1", "ProcId": "NATIONALE"}])
 
     assert str(conn.execute.call_args_list[0].args[0]) == "DELETE FROM resume_specialites"
-    assert (
-        str(conn.execute.call_args_list[1].args[0])
-        == 'INSERT INTO resume_specialites ("specId", "ProcId") VALUES (:specId, :ProcId)'
+    statement = conn.execute.call_args_list[1].args[0]
+    assert str(statement) == 'INSERT INTO resume_specialites ("specId", "ProcId") VALUES (:specId_m0, :ProcId_m0)'
+    assert statement.compile().params == {"specId_m0": "1", "ProcId_m0": "NATIONALE"}
+
+
+def test_replace_rows_batches_inserts_instead_of_executing_each_row():
+    engine = create_engine("sqlite://")
+    with engine.begin() as conn:
+        conn.execute(text('CREATE TABLE resume_test ("specId" TEXT PRIMARY KEY, label TEXT)'))
+        conn.execute(text("INSERT INTO resume_test VALUES ('old', 'old')"))
+
+    statements = []
+    event.listen(
+        engine, "before_cursor_execute", lambda conn, cursor, sql, params, ctx, many: statements.append((sql, many))
     )
+    rows = [{"specId": str(index), "label": "l'acide : label" if index % 2 else None} for index in range(1001)]
+    with engine.begin() as conn:
+        replace_rows(conn, "resume_test", rows)
+
+    inserts = [(sql, many) for sql, many in statements if sql.startswith("INSERT")]
+    assert len(inserts) == 3
+    assert all(not many for _, many in inserts)
+    with engine.connect() as conn:
+        actual = [
+            dict(row)
+            for row in conn.execute(text('SELECT * FROM resume_test ORDER BY CAST("specId" AS INT)')).mappings()
+        ]
+    assert actual == rows
+
+
+def test_replace_rows_rolls_back_delete_and_earlier_batches_on_failure():
+    engine = create_engine("sqlite://")
+    with engine.begin() as conn:
+        conn.execute(text("CREATE TABLE resume_test (id TEXT PRIMARY KEY)"))
+        conn.execute(text("INSERT INTO resume_test VALUES ('old')"))
+
+    rows = [{"id": str(index)} for index in range(500)] + [{"id": "0"}]
+    with pytest.raises(IntegrityError), engine.begin() as conn:
+        replace_rows(conn, "resume_test", rows)
+
+    with engine.connect() as conn:
+        assert conn.execute(text("SELECT id FROM resume_test")).scalars().all() == ["old"]
 
 
 def test_orchestrator_runs_each_target_in_its_own_transaction(monkeypatch):

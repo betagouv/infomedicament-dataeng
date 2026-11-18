@@ -8,9 +8,12 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import bindparam, text
+from sqlalchemy import bindparam, column, insert, text
+from sqlalchemy import table as sql_table
 
 from ..db import VISIBLE_SPECIALITE_AVAILABILITIES
+
+INSERT_BATCH_SIZE = 500
 
 
 @dataclass(frozen=True)
@@ -95,9 +98,11 @@ def replace_rows(conn, table: str, rows: list[dict[str, Any]]) -> None:
     columns = tuple(rows[0])
     if any(tuple(row) != columns for row in rows):
         raise ValueError(f"Rows for {table} do not have consistent columns")
-    placeholders = ", ".join(f":{column}" for column in columns)
-    quoted_columns = ", ".join(f'"{column}"' for column in columns)
-    conn.execute(text(f"INSERT INTO {table} ({quoted_columns}) VALUES ({placeholders})"), rows)
+    target = sql_table(table, *(column(name) for name in columns))
+    for offset in range(0, len(rows), INSERT_BATCH_SIZE):
+        # Explicit multi-row VALUES avoids psycopg2 executemany's per-row
+        # round trips, even without reflected column types or RETURNING.
+        conn.execute(insert(target).values(rows[offset : offset + INSERT_BATCH_SIZE]))
 
 
 def replace_letters(conn, target: str, letters: set[str]) -> None:
