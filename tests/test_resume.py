@@ -5,7 +5,8 @@ from datetime import datetime
 from unittest.mock import MagicMock
 
 import pytest
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, event, text
+from sqlalchemy.exc import IntegrityError
 
 from infomedicament_dataeng.resume import builder, composants, medicines, specialties, substances
 from infomedicament_dataeng.resume.common import (
@@ -110,16 +111,14 @@ def test_medicines_uses_selected_composants_for_aligned_substance_ids(monkeypatc
     assert rows[0]["subsNamesIds"] == ["34911", "00007"]
 
 
-def test_specialties_writes_all_main_names_when_one_name_is_secondary(monkeypatch):
+def test_specialties_writes_substance_page_title(monkeypatch):
     secondary = make_composant(name_id="34911", name="acide acétylsalicylique")
     canonical = make_composant(substance_id="00006", name_id="00006", name="caféine", number=2)
     rows = []
     monkeypatch.setattr(specialties, "load_specialties", lambda conn: [Specialty("1", "TEST 1 mg", "N", "DISPONIBLE")])
     monkeypatch.setattr(specialties, "load_composants_by_cis", lambda conn: {"1": [secondary, canonical]})
     monkeypatch.setattr(
-        specialties,
-        "load_main_names_by_subs_id",
-        lambda conn: {"00005": "acétylsalicylique (acide)", "00006": "caféine"},
+        specialties, "load_titles_by_subs_id", lambda conn: {"00005": "substance title", "00006": "caféine"}
     )
     monkeypatch.setattr(specialties, "load_indications", lambda conn: [])
     monkeypatch.setattr(specialties, "load_atc_by_cis", lambda conn: {})
@@ -130,16 +129,17 @@ def test_specialties_writes_all_main_names_when_one_name_is_secondary(monkeypatc
     specialties.build(None)
 
     assert rows[0]["subsIds"] == ["00005", "00006"]
-    assert rows[0]["subsMainNames"] == "acétylsalicylique (acide), caféine"
+    assert "subsMainNames" not in rows[0]
+    assert rows[0]["subsTitle"] == "substance title, caféine"
 
 
-@pytest.mark.parametrize("main_names", [{"00005": "acétylsalicylique (acide)"}, {}])
-def test_specialties_omits_main_names_when_names_match_or_canonical_is_missing(monkeypatch, main_names):
+@pytest.mark.parametrize("titles", [{"00005": "acétylsalicylique (acide)"}, {}])
+def test_specialties_title_matches_display_name_or_is_unresolved(monkeypatch, titles):
     composant = make_composant()
     rows = []
     monkeypatch.setattr(specialties, "load_specialties", lambda conn: [Specialty("1", "TEST 1 mg", "N", "DISPONIBLE")])
     monkeypatch.setattr(specialties, "load_composants_by_cis", lambda conn: {"1": [composant]})
-    monkeypatch.setattr(specialties, "load_main_names_by_subs_id", lambda conn: main_names)
+    monkeypatch.setattr(specialties, "load_titles_by_subs_id", lambda conn: titles)
     monkeypatch.setattr(specialties, "load_indications", lambda conn: [])
     monkeypatch.setattr(specialties, "load_atc_by_cis", lambda conn: {})
     monkeypatch.setattr(specialties, "load_surveillance_cis", lambda conn: set())
@@ -148,7 +148,8 @@ def test_specialties_omits_main_names_when_names_match_or_canonical_is_missing(m
 
     specialties.build(None)
 
-    assert rows[0]["subsMainNames"] is None
+    assert rows[0]["subsTitle"] == titles.get("00005")
+    assert "subsMainNames" not in rows[0]
 
 
 def test_substances_aggregates_speciality_counts_by_substance_id(monkeypatch):
@@ -164,6 +165,7 @@ def test_substances_aggregates_speciality_counts_by_substance_id(monkeypatch):
         ],
     )
     monkeypatch.setattr(substances, "load_composants_by_cis", lambda conn: {"1": [canonical], "2": [secondary]})
+    monkeypatch.setattr(substances, "load_titles_by_subs_id", lambda conn: {"00005": "substance title"})
     monkeypatch.setattr(
         substances, "load_name_types_by_nom_id", lambda conn: {"00005": "CANONIQUE", "34911": "SYNONYME"}
     )
@@ -178,6 +180,7 @@ def test_substances_aggregates_speciality_counts_by_substance_id(monkeypatch):
             "NomId": "00005",
             "NomLib": "acétylsalicylique (acide)",
             "type": "CANONIQUE",
+            "title": "substance title",
             "specialites": 2,
         },
         {
@@ -185,12 +188,13 @@ def test_substances_aggregates_speciality_counts_by_substance_id(monkeypatch):
             "NomId": "34911",
             "NomLib": "acide acétylsalicylique",
             "type": "SYNONYME",
+            "title": "substance title",
             "specialites": 2,
         },
     ]
 
 
-def test_canonical_lookup_uses_source_type_and_trims_ids():
+def test_name_type_lookup_uses_source_type_and_trims_ids():
     conn = MagicMock()
     conn.execute.return_value.mappings.return_value = [
         {"code_substance": " 00123 ", "code_nom": " 98765 ", "nom": " canonical label ", "type": "CANONIQUE"},
@@ -198,7 +202,6 @@ def test_canonical_lookup_uses_source_type_and_trims_ids():
         {"code_substance": "00124", "code_nom": "00124", "nom": "untyped", "type": None},
     ]
 
-    assert composants.load_main_names_by_subs_id(conn) == {"00123": "canonical label"}
     assert composants.load_name_types_by_nom_id(conn) == {"98765": "CANONIQUE", "00123": "SYNONYME", "00124": None}
 
 
@@ -223,6 +226,7 @@ def test_substance_rows_use_cleaned_names_for_letters_and_nullable_type(monkeypa
     monkeypatch.setattr(
         substances, "load_composants_by_cis", lambda conn: {"1": [make_composant(name="  &#xE9;ther&nbsp;  Δ  ")]}
     )
+    monkeypatch.setattr(substances, "load_titles_by_subs_id", lambda conn: {"00005": "substance title"})
     monkeypatch.setattr(substances, "load_name_types_by_nom_id", lambda conn: {})
     monkeypatch.setattr(substances, "replace_rows", lambda conn, table, values: rows.extend(values))
     monkeypatch.setattr(substances, "replace_letters", lambda conn, target, values: letters.append(values))
@@ -304,11 +308,13 @@ def test_substance_browse_uses_single_substance_or_fraction(monkeypatch, compone
     rows = []
     monkeypatch.setattr(substances, "load_specialties", lambda conn: [Specialty("1", "TEST 1 mg", "N", "DISPONIBLE")])
     monkeypatch.setattr(substances, "load_composants_by_cis", lambda conn: {"1": components})
+    monkeypatch.setattr(substances, "load_titles_by_subs_id", lambda conn: {"00005": "substance title"})
     monkeypatch.setattr(substances, "load_name_types_by_nom_id", lambda conn: {})
     monkeypatch.setattr(substances, "replace_rows", lambda conn, table, values: rows.extend(values))
     monkeypatch.setattr(substances, "replace_letters", lambda *args: None)
     substances.build(None)
-    assert [row["SubsId"] for row in rows] == expected_ids
+    assert [row["SubsId"] for row in rows if row["specialites"] > 0] == expected_ids
+    assert {row["SubsId"] for row in rows} == {item.substance_id for item in simple_composants(components)}
 
 
 def test_substance_browse_keeps_first_label_for_each_identity(monkeypatch):
@@ -326,6 +332,7 @@ def test_substance_browse_keeps_first_label_for_each_identity(monkeypatch):
         "load_composants_by_cis",
         lambda conn: {"1": [make_composant(name="alpha")], "2": [make_composant(name="zeta")]},
     )
+    monkeypatch.setattr(substances, "load_titles_by_subs_id", lambda conn: {"00005": "substance title"})
     monkeypatch.setattr(substances, "load_name_types_by_nom_id", lambda conn: {})
     monkeypatch.setattr(substances, "replace_rows", lambda conn, table, values: rows.extend(values))
     monkeypatch.setattr(substances, "replace_letters", lambda conn, target, values: letters.append(values))
@@ -341,7 +348,9 @@ def test_pregnancy_alert_includes_base_hidden_by_fraction(monkeypatch):
     fraction = make_composant(substance_id="2", nature="fraction", name="fraction")
     monkeypatch.setattr(specialties, "load_specialties", lambda conn: [Specialty("1", "TEST 1 mg", "N", "DISPONIBLE")])
     monkeypatch.setattr(specialties, "load_composants_by_cis", lambda conn: {"1": [base, fraction]})
-    monkeypatch.setattr(specialties, "load_main_names_by_subs_id", lambda conn: {})
+    monkeypatch.setattr(
+        specialties, "load_titles_by_subs_id", lambda conn: {"00005": "substance title", "00006": "caféine"}
+    )
     monkeypatch.setattr(specialties, "load_indications", lambda conn: [])
     monkeypatch.setattr(specialties, "load_atc_by_cis", lambda conn: {})
     monkeypatch.setattr(specialties, "load_surveillance_cis", lambda conn: set())
@@ -422,10 +431,48 @@ def test_replace_rows_quotes_application_column_names():
     replace_rows(conn, "resume_specialites", [{"specId": "1", "ProcId": "NATIONALE"}])
 
     assert str(conn.execute.call_args_list[0].args[0]) == "DELETE FROM resume_specialites"
-    assert (
-        str(conn.execute.call_args_list[1].args[0])
-        == 'INSERT INTO resume_specialites ("specId", "ProcId") VALUES (:specId, :ProcId)'
+    statement = conn.execute.call_args_list[1].args[0]
+    assert str(statement) == 'INSERT INTO resume_specialites ("specId", "ProcId") VALUES (:specId_m0, :ProcId_m0)'
+    assert statement.compile().params == {"specId_m0": "1", "ProcId_m0": "NATIONALE"}
+
+
+def test_replace_rows_batches_inserts_instead_of_executing_each_row():
+    engine = create_engine("sqlite://")
+    with engine.begin() as conn:
+        conn.execute(text('CREATE TABLE resume_test ("specId" TEXT PRIMARY KEY, label TEXT)'))
+        conn.execute(text("INSERT INTO resume_test VALUES ('old', 'old')"))
+
+    statements = []
+    event.listen(
+        engine, "before_cursor_execute", lambda conn, cursor, sql, params, ctx, many: statements.append((sql, many))
     )
+    rows = [{"specId": str(index), "label": "l'acide : label" if index % 2 else None} for index in range(1001)]
+    with engine.begin() as conn:
+        replace_rows(conn, "resume_test", rows)
+
+    inserts = [(sql, many) for sql, many in statements if sql.startswith("INSERT")]
+    assert len(inserts) == 3
+    assert all(not many for _, many in inserts)
+    with engine.connect() as conn:
+        actual = [
+            dict(row)
+            for row in conn.execute(text('SELECT * FROM resume_test ORDER BY CAST("specId" AS INT)')).mappings()
+        ]
+    assert actual == rows
+
+
+def test_replace_rows_rolls_back_delete_and_earlier_batches_on_failure():
+    engine = create_engine("sqlite://")
+    with engine.begin() as conn:
+        conn.execute(text("CREATE TABLE resume_test (id TEXT PRIMARY KEY)"))
+        conn.execute(text("INSERT INTO resume_test VALUES ('old')"))
+
+    rows = [{"id": str(index)} for index in range(500)] + [{"id": "0"}]
+    with pytest.raises(IntegrityError), engine.begin() as conn:
+        replace_rows(conn, "resume_test", rows)
+
+    with engine.connect() as conn:
+        assert conn.execute(text("SELECT id FROM resume_test")).scalars().all() == ["old"]
 
 
 def test_orchestrator_runs_each_target_in_its_own_transaction(monkeypatch):
@@ -449,3 +496,33 @@ def test_orchestrator_runs_each_target_in_its_own_transaction(monkeypatch):
 def test_orchestrator_rejects_unknown_target():
     with pytest.raises(ValueError, match="Unknown resume target"):
         builder.build_resume("unknown")
+
+
+def test_substances_retains_combination_only_names_with_zero_count(monkeypatch):
+    rows, letters = [], []
+    standalone = make_composant(substance_id="A", name_id="A_NAME", name="alpha")
+    combination_only = make_composant(substance_id="Z", name_id="Z_NAME", name="  zêta&nbsp; ", number=2)
+    invisible = make_composant(substance_id="HIDDEN", name="hidden")
+    monkeypatch.setattr(
+        substances,
+        "load_specialties",
+        lambda conn: [Specialty("1", "ALPHA 1 mg", "N", "DISPONIBLE"), Specialty("2", "COMBO 1 mg", "N", "DISPONIBLE")],
+    )
+    monkeypatch.setattr(
+        substances,
+        "load_composants_by_cis",
+        lambda conn: {"1": [standalone], "2": [standalone, combination_only], "3": [invisible]},
+    )
+    monkeypatch.setattr(substances, "load_titles_by_subs_id", lambda conn: {"A": "alpha", "Z": "zêta"})
+    monkeypatch.setattr(
+        substances, "load_name_types_by_nom_id", lambda conn: {"A_NAME": "CANONIQUE", "Z_NAME": "SYNONYME"}
+    )
+    monkeypatch.setattr(substances, "replace_rows", lambda conn, table, values: rows.extend(values))
+    monkeypatch.setattr(substances, "replace_letters", lambda conn, target, values: letters.append(values))
+
+    assert substances.build(None) == 2
+    assert sorted(rows, key=lambda row: row["SubsId"]) == [
+        {"SubsId": "A", "NomId": "A_NAME", "NomLib": "alpha", "type": "CANONIQUE", "title": "alpha", "specialites": 1},
+        {"SubsId": "Z", "NomId": "Z_NAME", "NomLib": "zêta", "type": "SYNONYME", "title": "zêta", "specialites": 0},
+    ]
+    assert letters == [{"A"}]
