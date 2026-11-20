@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from bs4 import BeautifulSoup
 
-from infomedicament_dataeng.centralise.extract import TextLine, _merge_same_line, _table_to_html
+from infomedicament_dataeng.centralise.extract import Table, TableCell, TextLine, _merge_same_line
 from infomedicament_dataeng.centralise.match import match_presentation
 from infomedicament_dataeng.centralise.parser import (
     _is_notice_header,
@@ -68,7 +68,9 @@ class TestExtractHelpers:
         assert len(_merge_same_line(lines)) == 2
 
     def test_table_to_html_escapes_and_wraps(self):
-        html = _table_to_html([["a & b", "c"], ["d", None]])
+        builder = _SemanticHtmlBuilder("rcp", "https://cdn.example.test/images", "images/", {})
+        builder.add(Table([[TableCell([TextLine("a & b", 11, False, 0, 0, 10)]), TableCell([])]], 0, 0))
+        html = builder.finish()
         assert html.startswith("<table><tbody>")
         assert "<td>a &amp; b</td>" in html
         assert "<td></td>" in html  # None cell
