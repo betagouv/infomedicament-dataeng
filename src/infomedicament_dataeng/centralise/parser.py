@@ -12,7 +12,7 @@ import re
 from datetime import date
 from typing import Iterable
 
-import fitz
+import pymupdf as fitz
 
 from ..config import get_config
 from ..parsing.anchors import NOTICE_NUMBER_TO_ANCHOR, RCP_NUMBER_TO_ANCHOR
@@ -93,6 +93,9 @@ def _runs_html(runs: list[TextRun]) -> str:
     parts: list[str] = []
     for run in runs:
         content = html.escape(run.text)
+        if not run.text.strip():
+            parts.append(content)
+            continue
         if run.underline:
             content = f"<u>{content}</u>"
         if run.bold:
@@ -181,7 +184,21 @@ class _SemanticHtmlBuilder:
     def add(self, el) -> None:
         if isinstance(el, Table):
             self._flush()
-            self.blocks.append(el.html)
+            rows = []
+            for row in el.rows:
+                cells = []
+                for cell in row:
+                    tag = "th" if cell.header else "td"
+                    attrs = ""
+                    if cell.colspan > 1:
+                        attrs += f' colspan="{cell.colspan}"'
+                    if cell.rowspan > 1:
+                        attrs += f' rowspan="{cell.rowspan}"'
+                    content = "<br/>".join(_runs_html(_line_runs(line)) for line in cell.lines)
+                    content += "".join(self._image_html(image) for image in cell.images)
+                    cells.append(f"<{tag}{attrs}>{content}</{tag}>")
+                rows.append("<tr>" + "".join(cells) + "</tr>")
+            self.blocks.append("<table><tbody>" + "".join(rows) + "</tbody></table>")
             self._prev_y1, self._prev_page = el.y0, el.page
             return
 
@@ -245,7 +262,11 @@ class _SemanticHtmlBuilder:
         ext = el.ext or "png"
         self.images[f"{self.image_prefix}centralise/{sha}.{ext}"] = el.data
         url = f"{self.cdn_base_url}/centralise/{sha}.{ext}"
-        return f'<figure><img src="{html.escape(url, quote=True)}" alt=""/></figure>'
+        width = f' width="{max(1, round((el.bbox[2] - el.bbox[0]) * 4 / 3))}"' if el.bbox else ""
+        return (
+            f'<figure><img src="{html.escape(url, quote=True)}"'
+            f' alt="{html.escape(el.alt, quote=True)}"{width}/></figure>'
+        )
 
 
 def _rcp_denomination(elements: list) -> str:
