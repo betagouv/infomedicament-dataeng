@@ -109,6 +109,31 @@ def test_iter_pediatric_rcps_streams_database_rows(monkeypatch):
     assert connection.batch_size == 25
 
 
+def test_pediatric_reader_resolves_public_ansm_atc_code(monkeypatch):
+    from sqlalchemy import create_engine, text
+
+    engine = create_engine("sqlite://")
+    html = semantic_rcp({"4.1": ["Contraception orale"]})
+    with engine.begin() as conn:
+        conn.connection.driver_connection.create_function("btrim", 1, lambda value: value.strip())
+        conn.execute(text('CREATE TABLE rcp ("codeCIS" INTEGER, content_html TEXT)'))
+        conn.execute(text("CREATE TABLE ansm_specialite_atc (cis TEXT, code_atc INTEGER)"))
+        conn.execute(text("CREATE TABLE ansm_atc (code INTEGER, libelle_abr TEXT)"))
+        conn.execute(text("INSERT INTO rcp VALUES (12345, :html), (67890, :html)"), {"html": html})
+        # Numeric keys and insertion order must not determine the primary ATC.
+        conn.execute(text("INSERT INTO ansm_atc VALUES (0, 'G03AA07'), (1, 'Z01AB01'), (2, NULL), (3, '')"))
+        conn.execute(
+            text("INSERT INTO ansm_specialite_atc VALUES ('12345', 1), ('12345', 0), ('12345', 2), ('12345', 3)")
+        )
+    monkeypatch.setattr(db, "get_postgres_engine", lambda config: engine)
+
+    records = list(db.iter_pediatric_rcps(limit=10))
+    assert [(record["cis"], record["atc_code"]) for record in records] == [("12345", "G03AA07"), ("67890", "")]
+    result = classify(records[0]["cis"], records[0]["content_html"], records[0]["atc_code"])
+    assert result.condition_c is True
+    assert "contraceptif (ATC G03)" in result.c_reasons
+
+
 def test_run_pediatric_classification_writes_predictions(tmp_path):
     output = tmp_path / "predictions.csv"
     records = [
