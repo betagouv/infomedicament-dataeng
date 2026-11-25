@@ -1,5 +1,6 @@
 """Simple sequential orchestration for the daily data refresh."""
 
+import json
 import logging
 import traceback
 from collections.abc import Callable
@@ -15,6 +16,7 @@ from .db import get_postgres_engine
 from .grist import sync_grist
 from .indications import build_indications
 from .resume import build_resume
+from .semantic_report import DocumentFailure, SemanticImportResult
 
 logger = logging.getLogger(__name__)
 
@@ -55,10 +57,24 @@ class RunLedger:
         self.connection.commit()
         return run_id
 
-    def record_semantic_watermark(self, run_id: UUID, watermark: datetime) -> None:
+    def pending_documents(self) -> list[DocumentFailure]:
+        report = self.connection.execute(
+            text(
+                "SELECT semantic_report FROM pipeline_run "
+                "WHERE semantic_report IS NOT NULL ORDER BY started_at DESC LIMIT 1"
+            )
+        ).scalar_one_or_none()
+        return [DocumentFailure(**document) for document in report["failed_documents"]] if report else []
+
+    def record_semantic_result(self, run_id: UUID, result: SemanticImportResult) -> None:
+        # Save retries and the watermark together: advancing one without the other
+        # would let failed documents fall out of the incremental selection window.
         self.connection.execute(
-            text("UPDATE pipeline_run SET semantic_watermark = :watermark WHERE id = :id"),
-            {"id": run_id, "watermark": watermark},
+            text(
+                "UPDATE pipeline_run SET semantic_watermark = :watermark, "
+                "semantic_report = CAST(:report AS jsonb) WHERE id = :id"
+            ),
+            {"id": run_id, "watermark": result.watermark, "report": json.dumps(result.report())},
         )
         self.connection.commit()
 
@@ -100,7 +116,7 @@ def _error_details(error: BaseException) -> str:
 
 def run_daily_sync(
     config: AppConfig,
-    semantic_importer: Callable[..., datetime | None],
+    semantic_importer: Callable[..., SemanticImportResult],
     *,
     trigger: str = "manual",
     ansm_config: Path = PROJECT_ROOT / "data_sources" / "ansm.yml",
@@ -119,15 +135,29 @@ def run_daily_sync(
             ledger = RunLedger(connection)
             started_at = datetime.now(timezone.utc)
             previous_watermark = ledger.previous_semantic_watermark()
+            pending_documents = ledger.pending_documents()
             semantic_cutoff = (
                 previous_watermark - SEMANTIC_WATERMARK_OVERLAP if previous_watermark is not None else None
             )
             run_id = ledger.start_run(trigger, started_at)
+            logger.info(
+                "Starting daily sync (run %s, trigger=%s, pending_documents=%d)",
+                run_id,
+                trigger,
+                len(pending_documents),
+            )
 
             def import_semantic() -> None:
-                watermark = semantic_importer(since=semantic_cutoff, full=previous_watermark is None)
-                if watermark is not None:
-                    ledger.record_semantic_watermark(run_id, watermark)
+                result = semantic_importer(
+                    since=semantic_cutoff, full=previous_watermark is None, pending_documents=pending_documents
+                )
+                ledger.record_semantic_result(run_id, result)
+                if result.failed_documents:
+                    logger.warning(
+                        "Semantic import completed with %d pending documents; continuing pipeline (run %s)",
+                        len(result.failed_documents),
+                        run_id,
+                    )
 
             steps = [
                 ("import-ansm", lambda: sync_datagouv_config(ansm_config)),

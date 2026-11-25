@@ -60,3 +60,62 @@ def test_sync_specialty_metadata_preserves_descriptions_and_removes_obsolete_row
     assert "DO UPDATE SET title = EXCLUDED.title" in insert_sql
     assert "description = EXCLUDED" not in insert_sql
     assert "DELETE FROM specialites_metadata" in delete_sql
+
+
+def test_worklist_includes_pending_cis_beyond_incremental_cutoff(monkeypatch):
+    from datetime import datetime
+
+    from sqlalchemy import create_engine, text
+
+    from infomedicament_dataeng import db
+
+    engine = create_engine("sqlite://")
+    with engine.begin() as connection:
+        connection.execute(
+            text("CREATE TABLE ansm_specialite (cis TEXT, denomination TEXT, procedure TEXT, code_ema TEXT)")
+        )
+        connection.execute(text("CREATE TABLE ansm_document (cis TEXT, type TEXT, url TEXT, date_modification TEXT)"))
+        connection.execute(text("INSERT INTO ansm_specialite VALUES ('61234567', 'TEST', 'NATIONALE', '')"))
+        connection.execute(
+            text(
+                "INSERT INTO ansm_document VALUES "
+                "('61234567', 'notice', 'https://ansm.example/current.html', '2026-01-01')"
+            )
+        )
+    monkeypatch.setattr(db, "get_postgres_engine", lambda config: engine)
+    cutoff = datetime(2026, 11, 22)
+    assert db.get_semantic_import_worklist(cutoff, config="postgres", limit=10) == []
+    selected = db.get_semantic_import_worklist(cutoff, config="postgres", limit=10, retry_cis=["61234567"])
+    assert [item["cis"] for item in selected] == ["61234567"]
+    assert selected[0]["documents"] == {"notice": "https://ansm.example/current.html"}
+
+
+def test_document_write_failure_calls_retry_handler_and_continues(monkeypatch):
+    from infomedicament_dataeng import db
+
+    connection = MagicMock()
+    engine = MagicMock()
+    engine.connect.return_value.__enter__.return_value = connection
+    monkeypatch.setattr(db, "get_postgres_engine", lambda config: engine)
+    first = {"cis": "61234567", "source_url": "https://ansm.example/broken.html"}
+    second = {"cis": "60000000", "source_url": "https://ansm.example/good.html"}
+    written = []
+
+    def upsert(connection, table, record):
+        if record is first:
+            raise ValueError("invalid record")
+        written.append(record)
+
+    monkeypatch.setattr(db, "_upsert_semantic_document", upsert)
+    failed = []
+    imported, errors = db.import_semantic_documents(
+        [first, second],
+        "notices",
+        config="postgres",
+        on_error=lambda record, error: failed.append((record, str(error))),
+    )
+    assert (imported, errors) == (1, 1)
+    assert failed == [(first, "invalid record")]
+    assert written == [second]
+    connection.rollback.assert_called_once()
+    connection.commit.assert_called_once()
