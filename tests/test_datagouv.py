@@ -109,6 +109,7 @@ class TestFetchCsv:
     def test_uses_dataset_encoding(self, sample_dataset: DataGouvDataset):
         latin1_content = "col_a|col_b\néàü|xyz\n"
         sample_dataset.source.encoding = "latin-1"
+        sample_dataset.columns = sample_dataset.columns[:2]
         with self._mock_urlopen(latin1_content, encoding="latin-1"):
             rows = fetch_csv(sample_dataset)
         assert rows[0][0] == "éàü"
@@ -117,6 +118,7 @@ class TestFetchCsv:
         dollar_quoted_csv = "$col_a$;$col_b$\n$val;1$;$val2$\n"
         sample_dataset.source.delimiter = ";"
         sample_dataset.source.quotechar = "$"
+        sample_dataset.columns = sample_dataset.columns[:2]
         with self._mock_urlopen(dollar_quoted_csv):
             rows = fetch_csv(sample_dataset)
         assert rows == [["val;1", "val2"]]
@@ -234,7 +236,10 @@ class TestImportDataset:
 
     def test_commits_transaction(self, sample_dataset: DataGouvDataset):
         mock_engine_patch, mock_engine, mock_conn = self._mock_engine()
-        with mock_engine_patch, patch("infomedicament_dataeng.datagouv.importer.fetch_csv", return_value=[]):
+        with (
+            mock_engine_patch,
+            patch("infomedicament_dataeng.datagouv.importer.fetch_csv", return_value=[["a", "b", "c"]]),
+        ):
             import_dataset(sample_dataset)
         mock_engine.begin.assert_called_once()
 
@@ -243,9 +248,71 @@ class TestImportDataset:
         mock_engine_patch, _, mock_conn = self._mock_engine()
         with (
             mock_engine_patch,
-            patch("infomedicament_dataeng.datagouv.importer.fetch_csv", return_value=[]),
+            patch("infomedicament_dataeng.datagouv.importer.fetch_csv", return_value=[["a", "b", "c"]]),
             patch("infomedicament_dataeng.datagouv.importer.sync_specialites_metadata") as sync_metadata,
         ):
             import_dataset(sample_dataset)
 
         sync_metadata.assert_called_once_with(mock_conn)
+
+    @pytest.mark.parametrize("rows", [[], [["a", "b"]], [["a", "b", "c"], ["malformed"]]])
+    def test_rejects_invalid_replacement_before_opening_database(self, sample_dataset, rows):
+        engine_patch, engine, _ = self._mock_engine()
+        with engine_patch, patch("infomedicament_dataeng.datagouv.importer.fetch_csv", return_value=rows):
+            with pytest.raises(ValueError, match="Refusing to replace 'test_table'"):
+                import_dataset(sample_dataset)
+        engine.begin.assert_not_called()
+
+    def test_empty_replacement_requires_explicit_configuration(self, sample_dataset):
+        sample_dataset.allow_empty = True
+        engine_patch, _, connection = self._mock_engine()
+        with engine_patch, patch("infomedicament_dataeng.datagouv.importer.fetch_csv", return_value=[]):
+            assert import_dataset(sample_dataset) == 0
+        assert "TRUNCATE" in str(connection.execute.call_args.args[0])
+
+
+def test_fetch_rejects_unclosed_csv_quote(sample_dataset):
+    with TestFetchCsv()._mock_urlopen('col_a|col_b|col_c\n"unclosed|b|c\n'):
+        import csv
+
+        with pytest.raises(csv.Error):
+            fetch_csv(sample_dataset)
+
+
+def test_load_dataset_allows_explicitly_empty_source(tmp_path):
+    configuration = (FIXTURES_DIR / "test_datagouv.yml").read_text()
+    configuration = configuration.replace("    postgresql_table:", "    allow_empty: true\n    postgresql_table:")
+    path = tmp_path / "source.yml"
+    path.write_text(configuration)
+    assert load_datasets(path)["test_dataset"].allow_empty
+
+
+@pytest.mark.parametrize("content", ["", "Service unavailable\n", "wrong|header\na|b|c\n"])
+def test_fetch_rejects_missing_or_wrong_width_header(sample_dataset, content):
+    sample_dataset.allow_empty = True
+    with TestFetchCsv()._mock_urlopen(content), pytest.raises(ValueError, match="CSV header"):
+        fetch_csv(sample_dataset)
+
+
+def test_header_only_csv_requires_explicit_empty_replacement(sample_dataset):
+    with TestFetchCsv()._mock_urlopen("col_a|col_b|col_c\n"):
+        assert fetch_csv(sample_dataset) == []
+
+
+@pytest.mark.parametrize("value", ['"abc"', '{"key": "value"}', "null"])
+def test_rejects_non_array_json_before_database_replacement(sample_dataset, value):
+    sample_dataset.columns[0].type = "array"
+    engine_patch, engine, _ = TestImportDataset()._mock_engine()
+    with engine_patch, patch("infomedicament_dataeng.datagouv.importer.fetch_csv", return_value=[[value, "b", "c"]]):
+        with pytest.raises(ValueError, match="Expected a JSON array"):
+            import_dataset(sample_dataset)
+    engine.begin.assert_not_called()
+
+
+def test_allow_empty_configuration_requires_boolean(tmp_path):
+    configuration = (FIXTURES_DIR / "test_datagouv.yml").read_text()
+    configuration = configuration.replace("    postgresql_table:", '    allow_empty: "false"\n    postgresql_table:')
+    path = tmp_path / "source.yml"
+    path.write_text(configuration)
+    with pytest.raises(ValueError, match="allow_empty must be a boolean"):
+        load_datasets(path)

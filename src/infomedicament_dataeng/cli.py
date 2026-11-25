@@ -32,6 +32,7 @@ from .orchestration import PipelineAlreadyRunning, run_daily_sync
 from .parsing import DEFAULT_IMAGE_BASE_URL, parse_semantic_document
 from .resume import RESUME_TARGETS, build_resume
 from .s3 import make_s3_client
+from .semantic_report import DocumentFailure, SemanticImportResult
 
 logger = logging.getLogger(__name__)
 
@@ -141,7 +142,8 @@ def import_semantic_documents_from_db(
     batch_size: int = 500,
     centralised_only: bool = False,
     non_centralised_only: bool = False,
-) -> datetime | None:
+    pending_documents: list[DocumentFailure] | None = None,
+) -> SemanticImportResult:
     """Import Notice/RCP content for specialties selected from PostgreSQL."""
     from .centralise.acquire import get_ema_pdf, pdf_cache_key
     from .centralise.match import match_presentation
@@ -162,7 +164,10 @@ def import_semantic_documents_from_db(
             source_watermarks.append(ansm_watermark)
     if full:
         sync_specialites_metadata_from_db(config.postgres)
-    worklist = get_semantic_import_worklist(cutoff, config.postgres, cis=cis, limit=None)
+    pending_documents = pending_documents or []
+    retry_cis = {document.cis for document in pending_documents}
+    refresh_cis = {document.cis for document in pending_documents if document.stage != "database"}
+    worklist = get_semantic_import_worklist(cutoff, config.postgres, cis=cis, limit=None, retry_cis=sorted(retry_cis))
 
     from .centralise.acquire import build_product_information_index, fetch_ema_document_report
     from .db import get_centralised_specialties
@@ -182,7 +187,11 @@ def import_semantic_documents_from_db(
     selected_by_cis = {item["cis"]: item for item in worklist}
     for specialty in all_centralised:
         document = ema_index.get(specialty["code_ema"].strip())
-        if cutoff is None or (document and _ema_document_updated_since(document, cutoff)):
+        if (
+            cutoff is None
+            or specialty["cis"] in retry_cis
+            or (document and _ema_document_updated_since(document, cutoff))
+        ):
             selected_by_cis.setdefault(
                 specialty["cis"],
                 {**specialty, "procedure": "CENTRALISEE", "documents": {}},
@@ -195,92 +204,157 @@ def import_semantic_documents_from_db(
         len(worklist),
         " for a full import" if cutoff is None else f" since {cutoff.isoformat()}",
     )
-    if not worklist:
-        return max(source_watermarks, default=None)
+    result = SemanticImportResult(watermark=max(source_watermarks, default=None))
+    failures = {(document.cis, document.document_type): document for document in pending_documents}
 
-    s3_client = make_s3_client()
-    glossary_terms = get_glossary_terms(config.postgres)
+    def failed(cis: str, doc_type: str, url: str | None, stage: str, error: Exception) -> None:
+        message = str(error)[:2000]
+        failures[(cis, doc_type)] = DocumentFailure(cis, doc_type, url, stage, message)
+        logger.error(
+            "Semantic document failed: cis=%s type=%s url=%s stage=%s error=%s",
+            cis,
+            doc_type,
+            url,
+            stage,
+            message,
+        )
+        logger.debug("Semantic document failure traceback", exc_info=(type(error), error, error.__traceback__))
+
+    # A removed catalog entry must not silently remove its outstanding retry.
+    selected = {item["cis"]: item for item in worklist}
+    for document in pending_documents:
+        item = selected.get(document.cis)
+        if item is None or (item["procedure"] != "CENTRALISEE" and document.document_type not in item["documents"]):
+            failed(
+                document.cis,
+                document.document_type,
+                document.url,
+                "resolve",
+                ValueError("Pending document is not available in the current catalog"),
+            )
+
     records = {"rcp": [], "notice": []}
-    parse_errors = 0
-    total_imported = {"rcp": 0, "notice": 0}
-    total_db_errors = 0
+    database_errors = 0
 
     def flush() -> None:
-        nonlocal total_db_errors
+        nonlocal database_errors
         for doc_type, table in (("rcp", "rcp"), ("notice", "notices")):
             if not records[doc_type]:
                 continue
-            imported, errors = import_semantic_documents(records[doc_type], table, config.postgres)
-            total_imported[doc_type] += imported
-            total_db_errors += errors
+            failed_cis = set()
+
+            def database_failure(record: dict, error: Exception) -> None:
+                failed_cis.add(record["cis"])
+                failed(record["cis"], doc_type, record["source_url"], "database", error)
+
+            imported, errors = import_semantic_documents(
+                records[doc_type], table, config.postgres, on_error=database_failure
+            )
+            result.imported[doc_type] += imported
+            database_errors += errors
+            for record in records[doc_type]:
+                if record["cis"] not in failed_cis:
+                    failures.pop((record["cis"], doc_type), None)
             records[doc_type].clear()
 
-    centralised = [item for item in worklist if item["procedure"] == "CENTRALISEE"]
-    ema_worklist = _get_ema_worklist(centralised, ema_index) if centralised else {}
+    if worklist:
+        s3_client = make_s3_client()
+        glossary_terms = get_glossary_terms(config.postgres)
+        centralised = [item for item in worklist if item["procedure"] == "CENTRALISEE"]
+        ema_worklist = _get_ema_worklist(centralised, ema_index) if centralised else {}
+        resolved_cis = {item["cis"] for items in ema_worklist.values() for item in items}
+        for item in centralised:
+            if item["cis"] not in resolved_cis:
+                for doc_type in ("rcp", "notice"):
+                    failed(
+                        item["cis"],
+                        doc_type,
+                        None,
+                        "resolve",
+                        ValueError(f"French EMA product information missing for code {item.get('code_ema', '')}"),
+                    )
 
-    for item in tqdm(worklist, desc="ANSM documents", unit="specialty"):
-        if item["procedure"] == "CENTRALISEE":
-            continue
-        for doc_type, url in item["documents"].items():
-            try:
-                filename = os.path.basename(unquote(urlparse(url).path))
-                if not filename:
-                    raise ValueError(f"document URL has no filename: {url!r}")
-                document = parse_semantic_document(
-                    _download_document(url),
-                    image_base_url=_document_image_base_url(url),
-                    glossary_terms=glossary_terms,
-                )
-                records[doc_type].append(
-                    {
-                        "cis": item["cis"],
-                        "filename": filename,
-                        "date_notif": document.date_notif.isoformat() if document.date_notif else None,
-                        "indication": document.indication,
-                        "content_html": document.content_html,
-                    }
-                )
+        for item in tqdm(worklist, desc="ANSM documents", unit="specialty"):
+            if item["procedure"] == "CENTRALISEE":
+                continue
+            for doc_type, url in item["documents"].items():
+                try:
+                    filename = os.path.basename(unquote(urlparse(url).path))
+                    if not filename:
+                        raise ValueError(f"document URL has no filename: {url!r}")
+                    document = parse_semantic_document(
+                        _download_document(url),
+                        image_base_url=_document_image_base_url(url),
+                        glossary_terms=glossary_terms,
+                    )
+                    if not document.content_html.strip():
+                        raise ValueError("Parsed document contains no semantic HTML")
+                    records[doc_type].append(
+                        {
+                            "cis": item["cis"],
+                            "source_url": url,
+                            "filename": filename,
+                            "date_notif": document.date_notif.isoformat() if document.date_notif else None,
+                            "indication": document.indication,
+                            "content_html": document.content_html,
+                        }
+                    )
+                except Exception as error:
+                    failed(item["cis"], doc_type, url, "download-or-parse", error)
                 if len(records[doc_type]) >= batch_size:
                     flush()
-            except Exception as e:
-                logger.error("Failed to download or parse %s for CIS %s from %s: %s", doc_type, item["cis"], url, e)
-                parse_errors += 1
 
-    for url, items in tqdm(ema_worklist.items(), desc="EMA PDFs", unit="pdf"):
-        try:
-            parsed = parse_pdf(get_ema_pdf(url, s3_client), glossary_terms=glossary_terms)
-            _upload_images(s3_client, parsed["images"])
-            filename = pdf_cache_key(url).rsplit("/", 1)[-1]
+        for url, items in tqdm(ema_worklist.items(), desc="EMA PDFs", unit="pdf"):
+            try:
+                # EMA can replace a broken PDF without changing its URL. A retry
+                # must not keep consuming the same cached bytes indefinitely.
+                pdf = (
+                    get_ema_pdf(url, s3_client, refresh=True)
+                    if any(item["cis"] in refresh_cis for item in items)
+                    else get_ema_pdf(url, s3_client)
+                )
+                parsed = parse_pdf(pdf, glossary_terms=glossary_terms)
+                _upload_images(s3_client, parsed["images"])
+                filename = pdf_cache_key(url).rsplit("/", 1)[-1]
+            except Exception as error:
+                for item in items:
+                    for doc_type in ("rcp", "notice"):
+                        failed(item["cis"], doc_type, url, "download-or-parse", error)
+                continue
             for item in items:
                 for doc_type in ("rcp", "notice"):
-                    document = match_presentation(item["denomination"], parsed[doc_type])
-                    if document:
+                    try:
+                        document = match_presentation(item["denomination"], parsed[doc_type])
+                        if not document:
+                            raise ValueError(f"No matching presentation for {item['denomination']}")
+                        if not document["content_html"].strip():
+                            raise ValueError("Matched document contains no semantic HTML")
                         records[doc_type].append(
                             {
                                 "cis": item["cis"],
+                                "source_url": url,
                                 "filename": filename,
                                 "date_notif": document["date_notif"],
                                 "indication": document["indication"],
                                 "content_html": document["content_html"],
                             }
                         )
-                        if len(records[doc_type]) >= batch_size:
-                            flush()
-        except Exception as e:
-            logger.error("Failed to parse EMA PDF %s: %s", url, e)
-            parse_errors += 1
+                    except Exception as error:
+                        failed(item["cis"], doc_type, url, "match", error)
+                    if len(records[doc_type]) >= batch_size:
+                        flush()
+        flush()
 
-    flush()
-    logger.info(
-        "DB-driven import complete: %d RCP + %d Notice imported, %d parse errors, %d database errors",
-        total_imported["rcp"],
-        total_imported["notice"],
-        parse_errors,
-        total_db_errors,
+    result.failed_documents = sorted(failures.values(), key=lambda document: (document.cis, document.document_type))
+    log_summary = logger.warning if result.failed_documents else logger.info
+    log_summary(
+        "Semantic import summary: rcp_imported=%d notice_imported=%d failed_documents=%d database_errors=%d",
+        result.imported["rcp"],
+        result.imported["notice"],
+        len(result.failed_documents),
+        database_errors,
     )
-    if total_db_errors:
-        raise RuntimeError(f"Database import failed for {total_db_errors} document(s)")
-    return max(source_watermarks, default=None)
+    return result
 
 
 def telecharger_html_depuis_s3(

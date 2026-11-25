@@ -116,7 +116,11 @@ uv run infomedicament-dataeng import-datagouv \
   --config data_sources/has.yml
 ```
 
-Each selected target table is truncated and fully reloaded. Use `--dataset NAME` to import one dataset from the YAML file.
+Each selected target table is truncated and fully reloaded. The CSV is downloaded, parsed, validated, and prepared before
+opening the replacement transaction. Empty datasets and rows with an unexpected column count are rejected, leaving the
+table unchanged. Set `allow_empty: true` on an individual dataset in its YAML configuration only when an empty replacement
+is expected. A single surplus trailing empty CSV field remains supported. Truncation and insertion share one transaction,
+so database insertion errors roll back the replacement. Use `--dataset NAME` to import one dataset from the YAML file.
 
 ## Daily orchestration
 
@@ -146,11 +150,45 @@ parallel after that join. Resume building waits for indications; HAS has no down
 The run succeeds only after the HAS, semantic, and resume branches have all completed.
 
 Scheduled runs should use `daily-sync --trigger schedule`. The command prevents overlap with a PostgreSQL advisory lock,
-stops on the first failed step, and records its name and error on the pipeline run. After a successful semantic import,
-the latest analyzed ANSM or EMA source modification date is persisted as its semantic watermark. The next run subtracts
+stops on the first fatal step failure, and records its name and error on the pipeline run. Individual semantic document
+failures are recorded for retry and do not stop the remaining documents, indications, or resume builders. After semantic
+processing, the latest analyzed ANSM or EMA source modification date is persisted as its semantic watermark. The next run subtracts
 24 hours from that watermark and reprocesses documents from the resulting cutoff; the first run performs a full semantic
 import. ANSM and HAS resources are fully imported on every run, and Grist, indications, and resume tables are always
 synchronized or rebuilt.
+
+### Document failures and retries
+
+Before deploying this version, deploy the migration managed in the Info Médicament application repository that adds a
+nullable `semantic_report` JSONB column to the existing `pipeline_run` table; no new table is needed. The application
+repository owns the database schema and migrations. This pipeline does not apply migrations automatically.
+
+Each semantic import logs individual failures at `ERROR` with CIS, document type, URL (when resolved), stage, and error.
+An end-of-step summary logs imported RCP/Notice counts, pending document count, and database error count. The summary uses
+`WARNING` when documents remain pending and `INFO` otherwise; detailed exception tracebacks use `DEBUG`.
+
+The daily pipeline saves that report and the source watermark together. Each subsequent run reads the latest non-null
+report, including reports from runs whose later steps failed, and selects pending CIS codes regardless of their source
+date. Retries use current catalog URLs/EMA metadata and refresh cached EMA PDFs for source/parse/match retries, even when
+their URLs have not changed. Database-only retries reuse validated cached PDFs. A failed or missing document stays pending
+until a successful database write clears it; successful documents continue to be published and the watermark can advance. A process interruption
+before saving the report leaves the previous watermark and report intact, so the next run repeats that selection.
+A document removed from the catalog remains pending with a resolution error for investigation.
+
+Inspect the latest report:
+
+```sql
+SELECT id, started_at, status, semantic_report
+FROM pipeline_run
+WHERE semantic_report IS NOT NULL
+ORDER BY started_at DESC
+LIMIT 1;
+```
+
+`semantic_report.imported` contains per-type counts, `failed_count` contains the pending count, and `failed_documents`
+contains the CIS, `document_type`, `url`, `stage`, and `error` for every outstanding document. A run can have `status = 'success'`
+with pending documents: it means the pipeline completed, including indications and resume tables. Scheduled
+retry persistence belongs to `daily-sync`; standalone `semantic-db-import` logs its outcomes but does not update the ledger.
 
 ## Grist reference data
 

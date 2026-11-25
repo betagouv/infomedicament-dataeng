@@ -1,7 +1,7 @@
 """PostgreSQL operations for semantic document imports."""
 
 import logging
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from datetime import datetime
 
 from sqlalchemy import bindparam, create_engine, text
@@ -95,10 +95,11 @@ def get_semantic_import_worklist(
     config: PostgresConfig | None = None,
     cis: str | None = None,
     limit: int | None = None,
+    retry_cis: list[str] | None = None,
 ) -> list[dict]:
     """Return specialties and their ANSM documents for a DB-driven semantic import.
 
-    A specialty is selected when one of its documents changed since the cutoff.
+    A specialty is selected when a document changed since the cutoff or its CIS is pending retry.
     ``since=None`` selects the full catalog.
     """
     engine = get_postgres_engine(config)
@@ -108,6 +109,7 @@ def get_semantic_import_worklist(
             SELECT s.cis, s.denomination, s.procedure, s.code_ema
             FROM ansm_specialite s
             WHERE (:since IS NULL
+                   OR s.cis IN :retry_cis
                    OR EXISTS (
                        SELECT 1 FROM ansm_document changed
                        WHERE changed.cis = s.cis AND changed.date_modification >= :since
@@ -123,8 +125,11 @@ def get_semantic_import_worklist(
         ORDER BY selected.cis, d.type
         """
     )
+    query = query.bindparams(bindparam("retry_cis", expanding=True))
     with engine.connect() as conn:
-        rows = conn.execute(query, {"since": since, "cis": cis, "limit": limit}).mappings()
+        rows = conn.execute(
+            query, {"since": since, "cis": cis, "limit": limit, "retry_cis": retry_cis or []}
+        ).mappings()
         specialties: dict[str, dict] = {}
         for row in rows:
             item = specialties.setdefault(
@@ -241,6 +246,7 @@ def import_semantic_documents(
     table: str,
     config: PostgresConfig | None = None,
     fail_fast: bool = False,
+    on_error: Callable[[dict, Exception], None] | None = None,
 ) -> tuple[int, int]:
     """Upsert semantic HTML into PostgreSQL, committing each document independently.
 
@@ -261,6 +267,8 @@ def import_semantic_documents(
                 conn.rollback()
                 if fail_fast:
                     raise
+                if on_error is not None:
+                    on_error(record, e)
                 logger.error("CIS %s failed: %s", cis, str(e).split("\n")[0])
                 logger.debug("CIS %s full traceback", cis, exc_info=True)
                 errors += 1
